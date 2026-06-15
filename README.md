@@ -1,87 +1,82 @@
-# claude-code-usage-statusline
+# Claude Code Usage Statusline
 
-在 Claude Code 狀態列即時顯示訂閱方案的 **5 小時 / 7 天剩餘額度與重置倒數**,零相依、單一檔、跨平台。
+**English** · [繁體中文](README.zh-TW.md)
+
+A status line for [Claude Code](https://claude.com/claude-code) that shows your subscription's **5-hour and weekly usage** with reset countdowns — at a glance, on every prompt.
 
 ```
 Opus 4.8 | 5h 剩 87% (重置 3h12m) | 週 剩 62% (重置 4d6h)
 ```
 
-額度資料直接取自 Claude Code 餵給 statusLine 的 stdin JSON(`rate_limits`),**不呼叫任何 API、不需金鑰**。
+Usage data is read straight from the JSON that Claude Code passes to the status line (`rate_limits`). **No API calls, no tokens, no keys.**
 
----
+## Features
 
-## 一鍵安裝
+- **Native on Windows** — runs in CMD/PowerShell as well as macOS, Linux, and WSL. No bash or `jq` required.
+- **Zero dependencies** — pure Node.js, nothing to `npm install`.
+- **Single file** — the whole installer is one `install.mjs`, so it works as a `curl | node` one-liner.
+- **Non-destructive install** — merges into `~/.claude/settings.json`, preserving your existing settings.
 
-前置需求:已安裝 **Node.js**(`node --version` 能跑即可)。
+## Requirements
 
-### macOS / Linux / WSL
+[Node.js](https://nodejs.org) (any recent version — verify with `node --version`).
+
+## Installation
+
+**macOS / Linux / WSL**
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/nyannyn/claude-code-usage-statusline/main/install.mjs | node -
 ```
 
-### Windows(PowerShell)
+**Windows (PowerShell)**
 
-PowerShell 的管線會幫文字加 BOM 害 `node -` 解析失敗,所以**先下載再執行**:
+PowerShell adds a BOM when piping text, which breaks `node -`, so download first, then run:
 
 ```powershell
 irm https://raw.githubusercontent.com/nyannyn/claude-code-usage-statusline/main/install.mjs -OutFile "$env:TEMP\install.mjs"; node "$env:TEMP\install.mjs"
 ```
 
-### 或:下載整個 repo 後本機執行(任何 OS)
+**Any OS (from a local clone)**
 
 ```bash
 node install.mjs
 ```
 
-安裝完**完全重啟 Claude Code**,送出第一則訊息收到回應後即顯示。
+Then **fully restart Claude Code**. The usage figures appear after the first response in a session.
 
----
+## How it works
 
-## 它做了什麼
+The installer:
 
-1. 把狀態列腳本寫到該使用者的 `~/.claude/statusline-limits.mjs`
-2. 偵測目前 node 的完整路徑(`process.execPath`)與家目錄,自動組出機器專屬命令
-3. 把 `statusLine` 合併進 `~/.claude/settings.json`(解析後只加這個鍵,**保留既有設定**)
+1. Writes the status line script to `~/.claude/statusline-limits.mjs`.
+2. Detects the current Node.js path (`process.execPath`) and home directory, then builds a machine-specific command.
+3. Merges a `statusLine` entry into `~/.claude/settings.json`, leaving your other settings untouched.
 
-整個安裝器是**單一 `install.mjs`**,狀態列腳本以 base64 內嵌其中,所以可直接 `curl | node -`。
+The status line script itself is embedded in `install.mjs` as base64, which is what makes the `curl | node` one-liner possible.
 
----
+## Notes
 
-## 注意事項 / 踩坑
+- **When usage shows up:** `rate_limits` is provided only on **Claude Pro/Max** plans, and only **after the first response** in a session. Before that, the line reads `額度資訊待首次請求後顯示` ("usage shown after first request") — this is expected.
+- **Why a full Node path with forward slashes:** on Windows, Claude Code launches the status line command through a bash-like shell. Backslashes get swallowed and `node` may not be on that shell's `PATH` (e.g. with nvm). The installer sidesteps both by writing an absolute, forward-slashed, quoted command.
 
-- **額度欄位的出現條件**:`rate_limits` 僅 **Claude Pro/Max 訂閱**、且**本 session 收到第一個回應後**才會由 Claude Code 提供;剛開啟時顯示「額度資訊待首次請求後顯示」屬正常。
-- **為何不用 bare `node` / 不直接複製 settings.json**:Claude Code 在 **Windows** 透過類 bash 的 shell 執行 statusLine 命令,反斜線會被當跳脫字元吃掉(`C:\...node.exe` → 找不到 node → 狀態列全空),PATH 也可能不含 node(如 nvm-for-windows)。安裝器用「**當前 node 絕對路徑 + 正斜線 + 雙引號**」一次解決,並避免硬編別人不存在的路徑。
-- **BOM**:stdin JSON 偶爾帶 BOM,腳本已在 `JSON.parse` 前 strip 掉。
-- 設定改動需**重啟** CLI 才會載入。
+## Uninstall
 
-## 移除
+Remove the `statusLine` key from `~/.claude/settings.json` (and optionally delete `~/.claude/statusline-limits.mjs`).
 
-把 `~/.claude/settings.json` 裡的 `statusLine` 鍵刪掉即可(並可刪 `~/.claude/statusline-limits.mjs`)。
+## Development
 
----
-
-## 開發:修改狀態列腳本後
-
-腳本以 base64 內嵌在 `install.mjs` 的 `SCRIPT_B64`。改完原始碼後重新編碼回填:
+The status line script is embedded in `install.mjs` as the `SCRIPT_B64` constant. After editing the source, re-encode it:
 
 ```bash
 node -e "process.stdout.write(require('fs').readFileSync('statusline-limits.mjs').toString('base64'))"
 ```
 
-(若你保留了獨立的 `statusline-limits.mjs` 原始檔)
+## Similar projects
 
----
-
-## 類似專案(參考)
-
-社群已有 Claude Code 狀態列方案,各有取捨(進度條、context、成本等),可依需求挑選(僅列有一定關注度者):
-
-- [hell0github/claude-statusline](https://github.com/hell0github/claude-statusline) — 輕量,context/cost/重置
-- [官方文件:Customize your status line](https://code.claude.com/docs/en/statusline)
-
-本專案的取向:**最小、零相依、單檔可 `curl | node`、專治跨 OS(尤其 Windows shell)安裝坑**。
+- [hell0github/claude-statusline](https://github.com/hell0github/claude-statusline) — lightweight, tracks context/cost/reset (Bash; requires WSL or Git Bash on Windows)
+- [Customize your status line — Claude Code Docs](https://code.claude.com/docs/en/statusline)
 
 ## License
 
-MIT
+[MIT](LICENSE)
