@@ -43,6 +43,8 @@ irm https://raw.githubusercontent.com/nyannyn/claude-code-usage-statusline/main/
 node install.mjs
 ```
 
+預設為英文狀態列;要繁體中文,在上述任一命令後加上 `zh`(例如 `node install.mjs zh`、`curl ... | node - zh`)。
+
 接著**完全重啟 Claude Code**。額度數字會在 session 收到第一個回應後出現。
 
 ## 運作方式

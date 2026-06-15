@@ -5,7 +5,7 @@
 A status line for [Claude Code](https://claude.com/claude-code) that shows your subscription's **5-hour and weekly usage** with reset countdowns — at a glance, on every prompt.
 
 ```
-Opus 4.8 | 5h 剩 87% (重置 3h12m) | 週 剩 62% (重置 4d6h)
+Opus 4.8 | 5h 87% left (resets 3h12m) | week 62% left (resets 4d6h)
 ```
 
 Usage data is read straight from the JSON that Claude Code passes to the status line (`rate_limits`). **No API calls, no tokens, no keys.**
@@ -42,6 +42,8 @@ irm https://raw.githubusercontent.com/nyannyn/claude-code-usage-statusline/main/
 ```bash
 node install.mjs
 ```
+
+For a Traditional Chinese status line, append `zh` to any command above (e.g. `node install.mjs zh`).
 
 Then **fully restart Claude Code**. The usage figures appear after the first response in a session.
 
