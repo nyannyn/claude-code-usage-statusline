@@ -32,12 +32,12 @@ Usage data is read straight from the JSON that Claude Code passes to the status 
 - **Windows** — paste into PowerShell:
 
   ```powershell
-  irm https://raw.githubusercontent.com/nyannyn/claude-code-usage-statusline/main/install.mjs -OutFile "$env:TEMP\install.mjs"; node "$env:TEMP\install.mjs"
+  irm https://raw.githubusercontent.com/nyannyn/claude-code-usage-statusline/main/install.ps1 | iex
   ```
 
 **3.** Quit Claude Code completely and reopen it. Done — usage appears after your first message.
 
-> Want a Traditional Chinese status line? Add a space and `zh` to the end of the command (e.g. `... | node - zh`).
+> Prefer a Traditional Chinese status line? Use the commands in the [繁體中文 README](README.zh-TW.md).
 
 ## How it works
 

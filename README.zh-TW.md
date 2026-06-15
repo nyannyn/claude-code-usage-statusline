@@ -32,12 +32,12 @@ Opus 4.8 | 5h 剩 87% (重置 3h12m) | 週 剩 62% (重置 4d6h)
 - **Windows** — 貼進 PowerShell:
 
   ```powershell
-  irm https://raw.githubusercontent.com/nyannyn/claude-code-usage-statusline/main/install.mjs -OutFile "$env:TEMP\install.mjs"; node "$env:TEMP\install.mjs" zh
+  $env:CLAUDE_SL_LANG="zh"; irm https://raw.githubusercontent.com/nyannyn/claude-code-usage-statusline/main/install.ps1 | iex
   ```
 
 **3.** 完全關閉 Claude Code 再重新打開。完成 — 送出第一則訊息後就會顯示額度。
 
-> 想要英文狀態列?把指令最後的 `zh` 拿掉即可。
+> 想要英文狀態列?用 [English README](README.md) 裡的指令。
 
 ## 運作方式
 
