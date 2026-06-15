@@ -17,35 +17,27 @@ Opus 4.8 | 5h 剩 87% (重置 3h12m) | 週 剩 62% (重置 4d6h)
 - **單一檔** — 整個安裝器就是一個 `install.mjs`,可直接 `curl | node` 一鍵安裝。
 - **不破壞既有設定** — 合併進 `~/.claude/settings.json`,保留你原本的設定。
 
-## 需求
+## 三步驟安裝
 
-[Node.js](https://nodejs.org)(任何較新版本,以 `node --version` 確認)。
+**1.** 先確認裝了 [Node.js](https://nodejs.org)(在終端機輸入 `node --version`,有跑出版本號就 OK)。
 
-## 安裝
+**2.** 複製對應你系統的那一行,貼到終端機按 Enter(這裡是**中文版**指令):
 
-**macOS / Linux / WSL**
+- **macOS / Linux / WSL** — 貼進 Terminal:
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/nyannyn/claude-code-usage-statusline/main/install.mjs | node -
-```
+  ```bash
+  curl -fsSL https://raw.githubusercontent.com/nyannyn/claude-code-usage-statusline/main/install.mjs | node - zh
+  ```
 
-**Windows(PowerShell)**
+- **Windows** — 貼進 PowerShell:
 
-PowerShell 管線會替文字加上 BOM 而使 `node -` 解析失敗,故先下載再執行:
+  ```powershell
+  irm https://raw.githubusercontent.com/nyannyn/claude-code-usage-statusline/main/install.mjs -OutFile "$env:TEMP\install.mjs"; node "$env:TEMP\install.mjs" zh
+  ```
 
-```powershell
-irm https://raw.githubusercontent.com/nyannyn/claude-code-usage-statusline/main/install.mjs -OutFile "$env:TEMP\install.mjs"; node "$env:TEMP\install.mjs"
-```
+**3.** 完全關閉 Claude Code 再重新打開。完成 — 送出第一則訊息後就會顯示額度。
 
-**任何 OS(本機 clone)**
-
-```bash
-node install.mjs
-```
-
-預設為英文狀態列;要繁體中文,在上述任一命令後加上 `zh`(例如 `node install.mjs zh`、`curl ... | node - zh`)。
-
-接著**完全重啟 Claude Code**。額度數字會在 session 收到第一個回應後出現。
+> 想要英文狀態列?把指令最後的 `zh` 拿掉即可。
 
 ## 運作方式
 

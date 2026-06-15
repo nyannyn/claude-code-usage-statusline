@@ -17,35 +17,27 @@ Usage data is read straight from the JSON that Claude Code passes to the status 
 - **Single file** — the whole installer is one `install.mjs`, so it works as a `curl | node` one-liner.
 - **Non-destructive install** — merges into `~/.claude/settings.json`, preserving your existing settings.
 
-## Requirements
+## Install in 3 steps
 
-[Node.js](https://nodejs.org) (any recent version — verify with `node --version`).
+**1.** Make sure [Node.js](https://nodejs.org) is installed (run `node --version` — if you see a version number, you're set).
 
-## Installation
+**2.** Copy the one line for your system and paste it into your terminal, then press Enter:
 
-**macOS / Linux / WSL**
+- **macOS / Linux / WSL** — paste into Terminal:
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/nyannyn/claude-code-usage-statusline/main/install.mjs | node -
-```
+  ```bash
+  curl -fsSL https://raw.githubusercontent.com/nyannyn/claude-code-usage-statusline/main/install.mjs | node -
+  ```
 
-**Windows (PowerShell)**
+- **Windows** — paste into PowerShell:
 
-PowerShell adds a BOM when piping text, which breaks `node -`, so download first, then run:
+  ```powershell
+  irm https://raw.githubusercontent.com/nyannyn/claude-code-usage-statusline/main/install.mjs -OutFile "$env:TEMP\install.mjs"; node "$env:TEMP\install.mjs"
+  ```
 
-```powershell
-irm https://raw.githubusercontent.com/nyannyn/claude-code-usage-statusline/main/install.mjs -OutFile "$env:TEMP\install.mjs"; node "$env:TEMP\install.mjs"
-```
+**3.** Quit Claude Code completely and reopen it. Done — usage appears after your first message.
 
-**Any OS (from a local clone)**
-
-```bash
-node install.mjs
-```
-
-For a Traditional Chinese status line, append `zh` to any command above (e.g. `node install.mjs zh`).
-
-Then **fully restart Claude Code**. The usage figures appear after the first response in a session.
+> Want a Traditional Chinese status line? Add a space and `zh` to the end of the command (e.g. `... | node - zh`).
 
 ## How it works
 
