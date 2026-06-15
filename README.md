@@ -75,13 +75,9 @@ node -e "process.stdout.write(require('fs').readFileSync('statusline-limits.mjs'
 
 ## 類似專案(參考)
 
-社群已有多個 Claude Code 狀態列方案,各有取捨(進度條、context、成本、peak/off-peak 等),可依需求挑選:
+社群已有 Claude Code 狀態列方案,各有取捨(進度條、context、成本等),可依需求挑選(僅列有一定關注度者):
 
-- [andrewii23/claude-statusline](https://github.com/andrewii23/claude-statusline) — 極簡,含 usage bars 與 rate limit 追蹤
-- [ohugonnot/claude-code-statusline](https://github.com/ohugonnot/claude-code-statusline) — session/weekly 配額、重置倒數、context、git branch
-- [haunchen/claude-code-statusline](https://github.com/haunchen/claude-code-statusline) — peak/off-peak 感知
 - [hell0github/claude-statusline](https://github.com/hell0github/claude-statusline) — 輕量,context/cost/重置
-- [jtbr 的完整 gist](https://gist.github.com/jtbr/4f99671d1cee06b44106456958caba8b) — 色彩進度條 + pacing,含各種 gotcha 說明
 - [官方文件:Customize your status line](https://code.claude.com/docs/en/statusline)
 
 本專案的取向:**最小、零相依、單檔可 `curl | node`、專治跨 OS(尤其 Windows shell)安裝坑**。
