@@ -17,7 +17,7 @@ Opus 4.8 | 5h 剩 87% (重置 3h12m) | 週 剩 62% (重置 4d6h)
 ### macOS / Linux / WSL
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/<YOUR_GH>/claude-code-usage-statusline/main/install.mjs | node -
+curl -fsSL https://raw.githubusercontent.com/nyannyn/claude-code-usage-statusline/main/install.mjs | node -
 ```
 
 ### Windows(PowerShell)
@@ -25,7 +25,7 @@ curl -fsSL https://raw.githubusercontent.com/<YOUR_GH>/claude-code-usage-statusl
 PowerShell 的管線會幫文字加 BOM 害 `node -` 解析失敗,所以**先下載再執行**:
 
 ```powershell
-irm https://raw.githubusercontent.com/<YOUR_GH>/claude-code-usage-statusline/main/install.mjs -OutFile "$env:TEMP\install.mjs"; node "$env:TEMP\install.mjs"
+irm https://raw.githubusercontent.com/nyannyn/claude-code-usage-statusline/main/install.mjs -OutFile "$env:TEMP\install.mjs"; node "$env:TEMP\install.mjs"
 ```
 
 ### 或:下載整個 repo 後本機執行(任何 OS)
