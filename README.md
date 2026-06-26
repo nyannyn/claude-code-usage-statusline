@@ -17,6 +17,7 @@ Usage data is read straight from the JSON that Claude Code passes to the status 
 - **Native on Windows** — runs in CMD/PowerShell as well as macOS, Linux, and WSL. No bash or `jq` required.
 - **Zero dependencies** — pure Node.js, nothing to `npm install`.
 - **Single file** — the whole installer is one `install.mjs`, so it works as a `curl | node` one-liner.
+- **Pick your segments** — choose which parts to show (model, effort, quota, account) and preview before installing. See [Customize segments](#customize-segments).
 - **Non-destructive install** — merges into `~/.claude/settings.json`, preserving your existing settings.
 
 ## Install in 3 steps
@@ -40,6 +41,46 @@ Usage data is read straight from the JSON that Claude Code passes to the status 
 **3.** Quit Claude Code completely and reopen it. Done — usage appears after your first message.
 
 > Prefer a Traditional Chinese status line? Use the commands in the [繁體中文 README](README.zh-TW.md).
+
+## Customize segments
+
+You choose which parts appear, and in what order, by passing a comma-separated list:
+
+| segment   | shows                                                                  |
+| --------- | --------------------------------------------------------------------- |
+| `model`   | model display name (e.g. `Opus 4.8`)                                  |
+| `effort`  | reasoning effort level — appended to the model as `·high`. Higher effort burns quota faster |
+| `5h`      | 5-hour quota remaining + reset countdown                              |
+| `week`    | weekly quota remaining + reset countdown                              |
+| `account` | account name (the part before `@` in your Claude login email)         |
+| `email`   | full account email                                                   |
+
+Default is `model,effort,5h,week`. `all` means `model,effort,5h,week,account`.
+`account` / `email` are read from your existing `~/.claude.json` — nothing is sent anywhere.
+
+**Preview before you install.** The `demo` flag renders a sample line from fake data, no Claude Code needed:
+
+```bash
+node statusline-limits.mjs zh all demo
+# Opus 4.8·high | 5h 剩 87% (重置 3h12m) | 週 剩 62% (重置 4d6h) | your-name
+
+node statusline-limits.mjs model,effort,5h,week,email demo
+# Opus 4.8·high | 5h 87% left (resets 3h12m) | week 62% left (resets 4d6h) | you@example.com
+```
+
+Install with your chosen segments by appending them:
+
+```bash
+# macOS / Linux / WSL
+curl -fsSL https://raw.githubusercontent.com/nyannyn/claude-code-usage-statusline/main/install.mjs | node - zh all
+```
+
+```powershell
+# Windows
+$env:CLAUDE_SL_LANG="zh"; $env:CLAUDE_SL_SEGMENTS="all"; irm https://raw.githubusercontent.com/nyannyn/claude-code-usage-statusline/main/install.ps1 | iex
+```
+
+> **Using an AI agent to set this up?** Point it at [`AGENTS.md`](AGENTS.md) — it tells the agent to offer the segment menu, render a preview, and install your selection.
 
 ## How it works
 

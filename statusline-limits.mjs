@@ -1,8 +1,35 @@
 #!/usr/bin/env node
-// Claude Code statusLine: subscription 5-hour / weekly usage remaining + reset countdown.
+// Claude Code statusLine: model + reasoning effort + subscription 5h/weekly usage + account.
 // rate_limits only appears on Pro/Max plans after the first request in a session; may be absent.
-// Pass "zh" as the first argument for Traditional Chinese; defaults to English.
-const ZH = process.argv[2] === "zh";
+//
+// Arguments (any order, space-separated):
+//   zh          Traditional Chinese output (default: English)
+//   demo        Render a sample line using fake data instead of reading stdin (for previews)
+//   <segments>  Comma-separated list picking which parts to show, in order. Available:
+//                 model    model display name (with ·effort appended when "effort" is on)
+//                 effort   reasoning effort level (low/medium/high/xhigh/max); attaches to model
+//                 5h       5-hour quota remaining + reset countdown
+//                 week     weekly quota remaining + reset countdown
+//                 account  account name (the part before @ in your Claude login email)
+//                 email    full account email
+//               Default when omitted: model,effort,5h,week
+//               Use "all" for model,effort,5h,week,account
+const args = process.argv.slice(2);
+const ZH = args.includes("zh") || process.env.CLAUDE_SL_LANG === "zh";
+const DEMO = args.includes("demo");
+const segArg =
+  args.find((a) => a !== "zh" && a !== "demo") || process.env.CLAUDE_SL_SEGMENTS || "";
+const ALL = "model,effort,5h,week,account";
+const segs = (segArg === "all" ? ALL : segArg || "model,effort,5h,week")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+const has = (s) => segs.includes(s);
+
+import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+
 const T = ZH
   ? {
       wait: "額度資訊待首次請求後顯示",
@@ -43,20 +70,71 @@ function seg(label, win) {
   return T.seg(label, remain, countdown(win.resets_at));
 }
 
+// Account email is NOT in the status line JSON; read it from ~/.claude.json.
+function account(full) {
+  try {
+    const j = JSON.parse(
+      readFileSync(join(homedir(), ".claude.json"), "utf8").replace(/^﻿/, "")
+    );
+    const email = j?.oauthAccount?.emailAddress;
+    if (!email) return "";
+    return full ? email : email.split("@")[0];
+  } catch {
+    return "";
+  }
+}
+
+const DEMO_DATA = {
+  model: { display_name: "Opus 4.8" },
+  effort: { level: "high" },
+  rate_limits: {
+    five_hour: {
+      used_percentage: 13,
+      resets_at: Math.floor(Date.now() / 1000) + 3 * 3600 + 12 * 60,
+    },
+    seven_day: {
+      used_percentage: 38,
+      resets_at: Math.floor(Date.now() / 1000) + 4 * 86400 + 6 * 3600,
+    },
+  },
+};
+
 try {
-  const raw = ((await readStdin()) || "{}").replace(/^﻿/, "").trim() || "{}";
-  const input = JSON.parse(raw);
+  let input;
+  if (DEMO) {
+    input = DEMO_DATA;
+  } else {
+    const raw = ((await readStdin()) || "{}").replace(/^﻿/, "").trim() || "{}";
+    input = JSON.parse(raw);
+  }
+
   const model = input?.model?.display_name || "Claude";
   const effort = input?.effort?.level;
-  const head = effort ? `${model}·${effort}` : model;
-  const rl = input.rate_limits;
-  if (!rl) {
-    process.stdout.write(`${head} | ${T.wait}`);
-  } else {
-    process.stdout.write(
-      `${head} | ${seg("5h", rl.five_hour)} | ${seg(T.week, rl.seven_day)}`
-    );
+  const parts = [];
+
+  if (has("model")) {
+    parts.push(has("effort") && effort ? `${model}·${effort}` : model);
+  } else if (has("effort") && effort) {
+    parts.push(effort);
   }
+
+  const rl = input.rate_limits;
+  if (has("5h") || has("week")) {
+    if (!rl) {
+      parts.push(T.wait);
+    } else {
+      if (has("5h")) parts.push(seg("5h", rl.five_hour));
+      if (has("week")) parts.push(seg(T.week, rl.seven_day));
+    }
+  }
+
+  if (has("account") || has("email")) {
+    let a = account(has("email"));
+    if (!a && DEMO) a = has("email") ? "you@example.com" : "you";
+    if (a) parts.push(a);
+  }
+
+  process.stdout.write(parts.join(" | ") || model);
 } catch (e) {
   process.stdout.write(`statusline err: ${String(e.message).slice(0, 40)}`);
 }

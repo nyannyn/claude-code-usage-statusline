@@ -17,6 +17,7 @@ Opus 4.8·high | 5h 剩 87% (重置 3h12m) | 週 剩 62% (重置 4d6h)
 - **Windows 原生可用** — CMD/PowerShell 與 macOS、Linux、WSL 皆可,毋須 bash 或 `jq`。
 - **零相依** — 純 Node.js,沒有要 `npm install` 的東西。
 - **單一檔** — 整個安裝器就是一個 `install.mjs`,可直接 `curl | node` 一鍵安裝。
+- **自選區段** — 自由選擇要顯示哪些部分(模型、思考層級、額度、帳號),安裝前可先預覽。見[自訂區段](#自訂區段)。
 - **不破壞既有設定** — 合併進 `~/.claude/settings.json`,保留你原本的設定。
 
 ## 三步驟安裝
@@ -40,6 +41,46 @@ Opus 4.8·high | 5h 剩 87% (重置 3h12m) | 週 剩 62% (重置 4d6h)
 **3.** 完全關閉 Claude Code 再重新打開。完成 — 送出第一則訊息後就會顯示額度。
 
 > 想要英文狀態列?用 [English README](README.md) 裡的指令。
+
+## 自訂區段
+
+用逗號分隔的清單,自由決定要顯示哪些部分、以及順序(由左到右):
+
+| 區段      | 顯示內容                                                       |
+| --------- | ------------------------------------------------------------ |
+| `model`   | 模型名稱(例 `Opus 4.8`)                                     |
+| `effort`  | 思考層級——以 `·high` 形式接在模型後。層級愈高愈耗額度          |
+| `5h`      | 5 小時額度剩餘 + 重置倒數                                     |
+| `week`    | 每週額度剩餘 + 重置倒數                                       |
+| `account` | 帳號簡稱(Claude 登入 email 中 `@` 前的部分)                 |
+| `email`   | 完整帳號 email                                               |
+
+預設為 `model,effort,5h,week`;`all` 等於 `model,effort,5h,week,account`。
+`account` / `email` 直接讀你既有的 `~/.claude.json`,不會送往任何地方。
+
+**安裝前先預覽。** `demo` 旗標會用假資料渲染一行範例,不需要 Claude Code:
+
+```bash
+node statusline-limits.mjs zh all demo
+# Opus 4.8·high | 5h 剩 87% (重置 3h12m) | 週 剩 62% (重置 4d6h) | 你的帳號名
+
+node statusline-limits.mjs zh model,effort,5h,week,email demo
+# Opus 4.8·high | 5h 剩 87% (重置 3h12m) | 週 剩 62% (重置 4d6h) | you@example.com
+```
+
+把選好的區段接在安裝指令後面即可:
+
+```bash
+# macOS / Linux / WSL
+curl -fsSL https://raw.githubusercontent.com/nyannyn/claude-code-usage-statusline/main/install.mjs | node - zh all
+```
+
+```powershell
+# Windows
+$env:CLAUDE_SL_LANG="zh"; $env:CLAUDE_SL_SEGMENTS="all"; irm https://raw.githubusercontent.com/nyannyn/claude-code-usage-statusline/main/install.ps1 | iex
+```
+
+> **用 AI agent 幫你設定?** 叫它讀 [`AGENTS.md`](AGENTS.md)——裡面會指示 agent 列出區段選單、渲染預覽,再依你的選擇安裝。
 
 ## 運作方式
 

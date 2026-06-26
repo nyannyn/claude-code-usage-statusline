@@ -3,6 +3,8 @@
 #   irm https://raw.githubusercontent.com/nyannyn/claude-code-usage-statusline/main/install.ps1 | iex
 # For a Traditional Chinese status line, set the language first:
 #   $env:CLAUDE_SL_LANG="zh"; irm <same url> | iex
+# To pick which segments to show (model,effort,5h,week,account,email or "all"):
+#   $env:CLAUDE_SL_SEGMENTS="all"; irm <same url> | iex
 $ErrorActionPreference = "Stop"
 
 $node = (Get-Command node -ErrorAction SilentlyContinue).Source
