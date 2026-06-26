@@ -58,6 +58,13 @@ Opus 4.8·high | 5h 剩 87% (重置 3h12m) | 週 剩 62% (重置 4d6h)
 預設為 `model,effort,5h,week`;`all` 等於 `model,effort,5h,week,account`。
 `account` / `email` 直接讀你既有的 `~/.claude.json`,不會送往任何地方。
 
+> **多視窗使用 `account` / `email` 請注意。** 狀態列 JSON 沒有帳號欄位,而
+> `~/.claude.json` 只存**最後一次登入**的帳號,所以同時開多個登入不同帳號的視窗時,
+> 它們會全部顯示同一個帳號。要讓各視窗顯示正確帳號,啟動該視窗的 Claude Code 前先設
+> `CLAUDE_SL_ACCOUNT`(例如 `CLAUDE_SL_ACCOUNT=work@acme.com claude`),或讓每個帳號
+> 各用自己的 `CLAUDE_CONFIG_DIR`。腳本的判斷順序:先看 `CLAUDE_SL_ACCOUNT`,再看
+> `CLAUDE_CONFIG_DIR` 下的 `.claude.json`,最後才是 `~/.claude.json`。
+
 **安裝前先預覽。** `demo` 旗標會用假資料渲染一行範例,不需要 Claude Code:
 
 ```bash

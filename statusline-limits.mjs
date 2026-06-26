@@ -14,6 +14,14 @@
 //                 email    full account email
 //               Default when omitted: model,effort,5h,week
 //               Use "all" for model,effort,5h,week,account
+//
+// Env vars:
+//   CLAUDE_SL_LANG=zh           same as the "zh" argument
+//   CLAUDE_SL_SEGMENTS=...      same as the <segments> argument
+//   CLAUDE_SL_ACCOUNT=you@x.com per-window account label for the account/email
+//                               segment (set before launching claude). Needed when
+//                               several windows are logged into different accounts,
+//                               because ~/.claude.json only stores the last login.
 const args = process.argv.slice(2);
 const ZH = args.includes("zh") || process.env.CLAUDE_SL_LANG === "zh";
 const DEMO = args.includes("demo");
@@ -70,11 +78,20 @@ function seg(label, win) {
   return T.seg(label, remain, countdown(win.resets_at));
 }
 
-// Account email is NOT in the status line JSON; read it from ~/.claude.json.
+// Account email is NOT in the status line JSON, and ~/.claude.json holds only ONE
+// account (the last login) — so with multiple windows on different accounts it
+// can't tell them apart. Resolution order:
+//   1. CLAUDE_SL_ACCOUNT env — explicit per-window label (set it before launching
+//      claude in that window); always correct, always wins.
+//   2. .claude.json under CLAUDE_CONFIG_DIR (when each account uses its own config
+//      dir), else ~/.claude.json as a best-effort fallback.
 function account(full) {
+  const override = process.env.CLAUDE_SL_ACCOUNT;
+  if (override) return full ? override : override.split("@")[0];
   try {
+    const dir = process.env.CLAUDE_CONFIG_DIR || homedir();
     const j = JSON.parse(
-      readFileSync(join(homedir(), ".claude.json"), "utf8").replace(/^﻿/, "")
+      readFileSync(join(dir, ".claude.json"), "utf8").replace(/^﻿/, "")
     );
     const email = j?.oauthAccount?.emailAddress;
     if (!email) return "";

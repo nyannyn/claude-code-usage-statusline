@@ -28,6 +28,10 @@ Notes to relay:
 - `account` / `email` are read from `~/.claude.json` (the user's existing Claude
   login) — no extra setup, nothing is sent anywhere.
 - Don't combine `account` and `email`; pick one.
+- **Multi-window caveat:** `~/.claude.json` stores only the last login, so if the
+  user keeps several windows on different accounts they'll all show the same one.
+  Tell them to set `CLAUDE_SL_ACCOUNT` before launching that window (the script
+  prefers it over the file), or to use a separate `CLAUDE_CONFIG_DIR` per account.
 
 ## 2. Render a preview (do this before installing)
 
