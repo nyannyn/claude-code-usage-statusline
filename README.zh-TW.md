@@ -2,13 +2,15 @@
 
 [English](README.md) · **繁體中文**
 
-一個 [Claude Code](https://claude.com/claude-code) 狀態列,在每次輸入時一眼看見訂閱方案的 **5 小時與每週額度**及重置倒數。
+一個 [Claude Code](https://claude.com/claude-code) 狀態列,在每次輸入時一眼看見目前模型、它的**思考層級**,以及訂閱方案的 **5 小時與每週額度**及重置倒數。
 
 ```
-Opus 4.8 | 5h 剩 87% (重置 3h12m) | 週 剩 62% (重置 4d6h)
+Opus 4.8·high | 5h 剩 87% (重置 3h12m) | 週 剩 62% (重置 4d6h)
 ```
 
-額度資料直接讀取 Claude Code 餵給狀態列的 JSON(`rate_limits`)。**不呼叫 API、不需金鑰。**
+模型名後面的 `·high` 是目前的思考層級(`low` / `medium` / `high` / `xhigh` / `max`)——層級愈高愈耗額度,所以放在這裡很實用。模型不支援思考參數時會自動省略。
+
+資料直接讀取 Claude Code 餵給狀態列的 JSON(`rate_limits` 與 `effort`)。**不呼叫 API、不需金鑰。**
 
 ## 特色
 

@@ -47,12 +47,14 @@ try {
   const raw = ((await readStdin()) || "{}").replace(/^﻿/, "").trim() || "{}";
   const input = JSON.parse(raw);
   const model = input?.model?.display_name || "Claude";
+  const effort = input?.effort?.level;
+  const head = effort ? `${model}·${effort}` : model;
   const rl = input.rate_limits;
   if (!rl) {
-    process.stdout.write(`${model} | ${T.wait}`);
+    process.stdout.write(`${head} | ${T.wait}`);
   } else {
     process.stdout.write(
-      `${model} | ${seg("5h", rl.five_hour)} | ${seg(T.week, rl.seven_day)}`
+      `${head} | ${seg("5h", rl.five_hour)} | ${seg(T.week, rl.seven_day)}`
     );
   }
 } catch (e) {

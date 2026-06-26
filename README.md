@@ -2,13 +2,15 @@
 
 **English** · [繁體中文](README.zh-TW.md)
 
-A status line for [Claude Code](https://claude.com/claude-code) that shows your subscription's **5-hour and weekly usage** with reset countdowns — at a glance, on every prompt.
+A status line for [Claude Code](https://claude.com/claude-code) that shows the current model, its **reasoning effort level**, and your subscription's **5-hour and weekly usage** with reset countdowns — at a glance, on every prompt.
 
 ```
-Opus 4.8 | 5h 87% left (resets 3h12m) | week 62% left (resets 4d6h)
+Opus 4.8·high | 5h 87% left (resets 3h12m) | week 62% left (resets 4d6h)
 ```
 
-Usage data is read straight from the JSON that Claude Code passes to the status line (`rate_limits`). **No API calls, no tokens, no keys.**
+The `·high` after the model name is the live reasoning effort (`low` / `medium` / `high` / `xhigh` / `max`) — handy because higher effort burns through your quota faster. It is omitted for models that don't support the effort parameter.
+
+Usage data is read straight from the JSON that Claude Code passes to the status line (`rate_limits` and `effort`). **No API calls, no tokens, no keys.**
 
 ## Features
 
