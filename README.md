@@ -54,6 +54,33 @@ The status line script itself is embedded in `install.mjs` as base64, which is w
 - **When usage shows up:** `rate_limits` is provided only on **Claude Pro/Max** plans, and only **after the first response** in a session. Before that, the line reads `額度資訊待首次請求後顯示` ("usage shown after first request") — this is expected.
 - **Why a full Node path with forward slashes:** on Windows, Claude Code launches the status line command through a bash-like shell. Backslashes get swallowed and `node` may not be on that shell's `PATH` (e.g. with nvm). The installer sidesteps both by writing an absolute, forward-slashed, quoted command.
 
+## Troubleshooting
+
+**The status line is blank / nothing shows up** — even though the install said it succeeded.
+
+The usual cause is **another `statusLine` entry overriding the one the installer wrote.** Claude Code merges settings from several files, and the most specific wins:
+
+```
+~/.claude/settings.json            ← user level (the installer writes here)
+<project>/.claude/settings.json    ← project, shared        (overrides user)
+<project>/.claude/settings.local.json ← project, local      (overrides everything)
+```
+
+So if any project folder you open has a `statusLine` in its `.claude/settings.json` or `.claude/settings.local.json`, that one shadows the user-level command — the installer's entry is correct but never gets used.
+
+This bites hardest **across operating systems.** A command generated under WSL/Linux looks like:
+
+```json
+"statusLine": {
+  "type": "command",
+  "command": "/home/<user>/.nvm/versions/node/v24.14.0/bin/node /home/<user>/.claude/statusline-limits.mjs"
+}
+```
+
+That absolute Linux path does not exist on native Windows, so the command fails silently and the status line stays blank — restarting the shell never helps, because the broken entry is still there.
+
+**Fix:** open the project's `.claude/settings.json` and `.claude/settings.local.json` and remove the `statusLine` block (so the user-level one applies again), **or** re-run the installer in the environment you actually use so the path matches. To confirm which command is live, check the `statusLine` value in each settings file from the most specific down.
+
 ## Uninstall
 
 Remove the `statusLine` key from `~/.claude/settings.json` (and optionally delete `~/.claude/statusline-limits.mjs`).

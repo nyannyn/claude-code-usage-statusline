@@ -54,6 +54,33 @@ Opus 4.8 | 5h 剩 87% (重置 3h12m) | 週 剩 62% (重置 4d6h)
 - **額度何時出現:** `rate_limits` 僅 **Claude Pro/Max** 方案、且 session **收到第一個回應後**才會提供。在那之前狀態列會顯示「額度資訊待首次請求後顯示」,屬正常現象。
 - **為何用 node 完整路徑 + 正斜線:** Windows 上 Claude Code 透過類 bash 的 shell 啟動狀態列命令,反斜線會被吃掉,且該 shell 的 `PATH` 可能不含 node(如使用 nvm)。安裝器以絕對路徑、正斜線、加雙引號的命令一次避開這兩個問題。
 
+## 疑難排解
+
+**狀態列空白 / 完全沒顯示** — 即使安裝顯示成功也一樣。
+
+最常見的原因是**有另一個 `statusLine` 設定蓋過了安裝器寫入的那個。** Claude Code 會合併多個設定檔,愈「具體」的優先序愈高:
+
+```
+~/.claude/settings.json               ← 使用者層(安裝器寫這裡)
+<專案>/.claude/settings.json          ← 專案層,共用      (蓋過使用者層)
+<專案>/.claude/settings.local.json    ← 專案層,本機      (蓋過一切)
+```
+
+所以只要你開的某個專案資料夾,它的 `.claude/settings.json` 或 `.claude/settings.local.json` 裡有 `statusLine`,就會蓋掉使用者層的命令——安裝器寫的那筆是對的,但永遠輪不到它生效。
+
+**跨作業系統時最容易中招。** 在 WSL/Linux 下產生的命令長這樣:
+
+```json
+"statusLine": {
+  "type": "command",
+  "command": "/home/<user>/.nvm/versions/node/v24.14.0/bin/node /home/<user>/.claude/statusline-limits.mjs"
+}
+```
+
+這個 Linux 絕對路徑在 Windows 原生環境並不存在,於是命令靜默失敗、狀態列保持空白——重開 shell 也沒用,因為壞掉的那筆設定還在。
+
+**修法:** 打開該專案的 `.claude/settings.json` 與 `.claude/settings.local.json`,把 `statusLine` 區塊刪掉(讓使用者層那筆重新生效),**或**在你實際使用的環境重跑一次安裝器讓路徑對上。想確認目前生效的是哪一條,就從最具體的設定檔由下往上檢查各檔的 `statusLine` 值。
+
 ## 移除
 
 刪除 `~/.claude/settings.json` 中的 `statusLine` 鍵即可(並可一併刪除 `~/.claude/statusline-limits.mjs`)。
