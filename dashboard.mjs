@@ -335,11 +335,27 @@ const server = createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, "127.0.0.1", () => {
-  const url = `http://localhost:${PORT}`;
-  console.log(`${T.title}: ${url}${LIVE ? "  (--live)" : ""}${DEMO ? "  (demo)" : ""}`);
-  if (OPEN) {
-    const cmd = WIN ? `start "" "${url}"` : platform() === "darwin" ? `open "${url}"` : `xdg-open "${url}"`;
-    exec(cmd, () => {});
+const url = `http://localhost:${PORT}`;
+
+function openBrowser() {
+  const cmd = WIN ? `start "" "${url}"` : platform() === "darwin" ? `open "${url}"` : `xdg-open "${url}"`;
+  exec(cmd, () => {});
+}
+
+server.on("error", (e) => {
+  if (e.code === "EADDRINUSE") {
+    // A dashboard is already serving this port (e.g. the desktop shortcut was
+    // double-clicked twice, or claude-trio started one) — just show that one.
+    console.log(ZH ? `儀表板已在 ${url} 執行中,直接開啟。` : `Dashboard already running at ${url}, opening it.`);
+    if (OPEN) openBrowser();
+    setTimeout(() => process.exit(0), 1500); // let the console window be read, not flash
+    return;
   }
+  console.error(String(e.stack || e));
+  setTimeout(() => process.exit(1), 15000); // keep the window up long enough to read the error
+});
+
+server.listen(PORT, "127.0.0.1", () => {
+  console.log(`${T.title}: ${url}${LIVE ? "  (--live)" : ""}${DEMO ? "  (demo)" : ""}`);
+  if (OPEN) openBrowser();
 });
