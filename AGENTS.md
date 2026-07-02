@@ -77,7 +77,28 @@ $env:CLAUDE_SL_LANG="zh"; $env:CLAUDE_SL_SEGMENTS="<segments>"; irm https://raw.
 The installer writes the `statusLine` command into `~/.claude/settings.json`.
 Tell the user to **fully restart Claude Code** afterwards.
 
-## 4. If the status line stays blank afterwards
+## 4. Multi-account dashboard (optional)
+
+If the user runs several Claude accounts (separate `CLAUDE_CONFIG_DIR`s), offer
+the dashboard — a zero-dependency local web page showing every account's
+5-hour/weekly quota side by side. The installer already placed it at
+`~/.claude/dashboard.mjs` and, on Windows, created a desktop shortcut
+("Claude Usage Dashboard"). Preview it with fake data first, like the status
+line's demo flag:
+
+```bash
+node ~/.claude/dashboard.mjs zh demo     # preview, reads nothing
+node ~/.claude/dashboard.mjs zh          # snapshot mode: reads ~/.claude-usage/, no API calls
+node ~/.claude/dashboard.mjs zh --live   # also polls Anthropic's OAuth usage endpoint per profile
+```
+
+Snapshot mode needs the status line to have rendered at least once per account
+(that's what writes `~/.claude-usage/<profile>.json`). `--live` reads each
+profile's `.credentials.json` token locally; warn the user that the endpoint is
+undocumented and heavily rate-limited (results are cached 60s). See
+"Multi-account dashboard" in the README for env vars.
+
+## 5. If the status line stays blank afterwards
 
 A `statusLine` entry in a project's `.claude/settings.json` or
 `.claude/settings.local.json` overrides the user-level one (project beats user;

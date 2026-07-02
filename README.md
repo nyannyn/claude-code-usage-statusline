@@ -90,6 +90,53 @@ $env:CLAUDE_SL_LANG="zh"; $env:CLAUDE_SL_SEGMENTS="all"; irm https://raw.githubu
 
 > **Using an AI agent to set this up?** Point it at [`AGENTS.md`](AGENTS.md) — it tells the agent to offer the segment menu, render a preview, and install your selection.
 
+## Multi-account dashboard
+
+Running several Claude subscriptions (e.g. one `CLAUDE_CONFIG_DIR` per account)? The dashboard shows **every account's 5-hour and weekly quota side by side** in your browser — one card per profile, with usage bars, reset countdowns, email/plan/model, and data freshness. Auto-refreshes every 30 seconds.
+
+**Try it right now** (fake data, reads nothing, no install):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/nyannyn/claude-code-usage-statusline/main/dashboard.mjs | node - demo
+```
+
+```powershell
+# Windows PowerShell
+irm https://raw.githubusercontent.com/nyannyn/claude-code-usage-statusline/main/dashboard.mjs | node - demo
+```
+
+**Real usage in 3 steps:**
+
+1. Give each account its own config dir and log in once per dir: `CLAUDE_CONFIG_DIR=~/.claude-b claude`
+2. Install the status line (top of this README) — the installer now also drops `dashboard.mjs` into `~/.claude/` and, on Windows, puts a **"Claude Usage Dashboard" shortcut on your desktop**. On macOS/Linux it prints a ready-made `claude-usage` alias for your shell rc.
+3. Launch it — double-click the shortcut, use the alias, or run the same one-liner as above without `demo` (add `--live` for idle accounts):
+
+```bash
+node ~/.claude/dashboard.mjs           # snapshots only, zero API calls
+node ~/.claude/dashboard.mjs --live    # + query Anthropic for accounts with no open window
+```
+
+**How it gets the data — two sources, merged per profile:**
+
+1. **Snapshots (default, zero API calls).** Whenever the status line renders, it also drops that profile's latest `rate_limits` into `~/.claude-usage/<profile>.json`. The dashboard reads those files — nothing else. Data is as fresh as the last prompt you sent in each account's window; a card goes `stale` after 15 minutes without one. On Windows the dashboard also scans every WSL distro's `~/.claude-usage`, so native and WSL windows land on the same page.
+
+2. **Live mode (`--live`, opt-in).** Additionally reads each profile's OAuth token from `<config-dir>/.credentials.json` and queries Anthropic's usage endpoint directly — fresh numbers even for accounts with no open window. Tokens never leave your machine (the only request goes to `api.anthropic.com`), but note this endpoint is undocumented and rate-limits aggressively, so results are cached for 60 seconds. Expired tokens are reported per card; opening Claude Code once on that account refreshes them.
+
+```bash
+node dashboard.mjs zh --live          # snapshots + live polling
+node dashboard.mjs --port 8080       # custom port
+node dashboard.mjs --no-open         # don't auto-launch the browser
+```
+
+| env var | meaning |
+| --- | --- |
+| `CLAUDE_USAGE_DIRS` | extra snapshot dirs, `;`-separated |
+| `CLAUDE_CONFIG_DIRS` | config dirs for `--live`, `;`-separated (default: every `~/.claude*` dir with a `.credentials.json`) |
+| `CLAUDE_SL_SNAPSHOT=0` | stop the status line from writing snapshots |
+| `CLAUDE_SL_USAGE_DIR` | where the status line writes snapshots (default `~/.claude-usage`) |
+
+Profiles are identified by **config dir name + host**, because a Windows `.claude-b` and a WSL `.claude-b` can be different logins. Each card shows the profile's email (best effort — `.claude.json` only records the last login), plan, model, usage bars with reset countdowns, and per-model weekly caps in live mode.
+
 ## How it works
 
 The installer:
@@ -138,10 +185,17 @@ Remove the `statusLine` key from `~/.claude/settings.json` (and optionally delet
 
 ## Development
 
-The status line script is embedded in `install.mjs` as the `SCRIPT_B64` constant. After editing the source, re-encode it:
+The status line script and the dashboard are embedded in `install.mjs` as the `SCRIPT_B64` and `DASHBOARD_B64` constants. After editing either source file, re-embed both:
 
 ```bash
-node -e "process.stdout.write(require('fs').readFileSync('statusline-limits.mjs').toString('base64'))"
+node -e "
+const fs = require('fs');
+let s = fs.readFileSync('install.mjs', 'utf8');
+for (const [c, f] of [['SCRIPT_B64', 'statusline-limits.mjs'], ['DASHBOARD_B64', 'dashboard.mjs']])
+  s = s.replace(new RegExp('const ' + c + ' =\\r?\\n  \"[A-Za-z0-9+/=]+\";'),
+    'const ' + c + ' =\n  \"' + fs.readFileSync(f).toString('base64') + '\";');
+fs.writeFileSync('install.mjs', s);
+"
 ```
 
 ## Similar projects

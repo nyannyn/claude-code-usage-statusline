@@ -89,6 +89,53 @@ $env:CLAUDE_SL_LANG="zh"; $env:CLAUDE_SL_SEGMENTS="all"; irm https://raw.githubu
 
 > **用 AI agent 幫你設定?** 叫它讀 [`AGENTS.md`](AGENTS.md)——裡面會指示 agent 列出區段選單、渲染預覽,再依你的選擇安裝。
 
+## 多帳號儀表板
+
+同時養好幾個 Claude 訂閱帳號(例如每個帳號各一個 `CLAUDE_CONFIG_DIR`)?儀表板讓你在瀏覽器裡**一頁看齊所有帳號的 5 小時與每週額度**——每個 profile 一張卡:用量條、重置倒數、email/方案/模型、資料新鮮度,每 30 秒自動更新。
+
+**現在就試**(假資料、不讀任何東西、免安裝):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/nyannyn/claude-code-usage-statusline/main/dashboard.mjs | node - zh demo
+```
+
+```powershell
+# Windows PowerShell
+irm https://raw.githubusercontent.com/nyannyn/claude-code-usage-statusline/main/dashboard.mjs | node - zh demo
+```
+
+**真實用量三步驟:**
+
+1. 每個帳號各給一個 config 目錄,各登入一次:`CLAUDE_CONFIG_DIR=~/.claude-b claude`
+2. 安裝狀態列(本 README 開頭)——安裝器現在會一併把 `dashboard.mjs` 放進 `~/.claude/`;Windows 上還會**在桌面建「Claude 用量儀表板」捷徑**,macOS/Linux 則印出可直接貼進 shell rc 的 `claude-usage` alias。
+3. 啟動——雙擊捷徑、用 alias,或跑上面那行一鍵指令(拿掉 `demo`;閒置帳號想看即時數字就加 `--live`):
+
+```bash
+node ~/.claude/dashboard.mjs zh           # 純快照,零 API 呼叫
+node ~/.claude/dashboard.mjs zh --live    # + 向 Anthropic 查沒開視窗的帳號
+```
+
+**資料來源有兩種,依 profile 合併:**
+
+1. **快照(預設,零 API 呼叫)。** 狀態列每次渲染時,順手把該 profile 最新的 `rate_limits` 寫進 `~/.claude-usage/<profile>.json`,儀表板只讀這些檔案。資料新鮮度等於你在該帳號視窗最後一次送訊息的時間;超過 15 分鐘沒更新會標示「資料過舊」。Windows 上還會自動掃描每個 WSL distro 的 `~/.claude-usage`,原生與 WSL 視窗同頁顯示。
+
+2. **即時模式(`--live`,自行選用)。** 額外從各 `<config-dir>/.credentials.json` 讀取 OAuth token,直接向 Anthropic 的用量端點查詢——連沒開視窗的帳號也有即時數字。Token 不會離開你的機器(唯一的請求只發往 `api.anthropic.com`),但注意這是未文件化的端點且限流很兇,因此結果會快取 60 秒。Token 過期會顯示在該卡片上;在那個帳號開一次 Claude Code 即可刷新。
+
+```bash
+node dashboard.mjs zh --live         # 快照 + 即時查詢
+node dashboard.mjs zh --port 8080    # 自訂 port
+node dashboard.mjs zh --no-open      # 不自動開瀏覽器
+```
+
+| 環境變數 | 意義 |
+| --- | --- |
+| `CLAUDE_USAGE_DIRS` | 額外的快照目錄,以 `;` 分隔 |
+| `CLAUDE_CONFIG_DIRS` | `--live` 要用的 config 目錄,以 `;` 分隔(預設:所有含 `.credentials.json` 的 `~/.claude*` 目錄) |
+| `CLAUDE_SL_SNAPSHOT=0` | 停用狀態列寫快照 |
+| `CLAUDE_SL_USAGE_DIR` | 狀態列寫快照的位置(預設 `~/.claude-usage`) |
+
+Profile 的識別是 **config 目錄名 + 主機**,因為 Windows 的 `.claude-b` 和 WSL 的 `.claude-b` 可能登入不同帳號。卡片上的 email 僅供參考(`.claude.json` 只記最後一次登入);即時模式還會顯示各模型的每週上限。
+
 ## 運作方式
 
 安裝器會:
@@ -137,10 +184,17 @@ $env:CLAUDE_SL_LANG="zh"; $env:CLAUDE_SL_SEGMENTS="all"; irm https://raw.githubu
 
 ## 開發
 
-狀態列腳本以 `install.mjs` 中的 `SCRIPT_B64` 常數內嵌。修改原始碼後重新編碼:
+狀態列腳本與儀表板以 `install.mjs` 中的 `SCRIPT_B64`、`DASHBOARD_B64` 常數內嵌。修改任一原始碼後重新嵌入:
 
 ```bash
-node -e "process.stdout.write(require('fs').readFileSync('statusline-limits.mjs').toString('base64'))"
+node -e "
+const fs = require('fs');
+let s = fs.readFileSync('install.mjs', 'utf8');
+for (const [c, f] of [['SCRIPT_B64', 'statusline-limits.mjs'], ['DASHBOARD_B64', 'dashboard.mjs']])
+  s = s.replace(new RegExp('const ' + c + ' =\\r?\\n  \"[A-Za-z0-9+/=]+\";'),
+    'const ' + c + ' =\n  \"' + fs.readFileSync(f).toString('base64') + '\";');
+fs.writeFileSync('install.mjs', s);
+"
 ```
 
 ## 類似專案

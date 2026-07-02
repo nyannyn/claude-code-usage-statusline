@@ -22,6 +22,8 @@
 //                               segment (set before launching claude). Needed when
 //                               several windows are logged into different accounts,
 //                               because ~/.claude.json only stores the last login.
+//   CLAUDE_SL_SNAPSHOT=0        disable writing usage snapshots for the dashboard
+//   CLAUDE_SL_USAGE_DIR=<dir>   where snapshots go (default ~/.claude-usage)
 const args = process.argv.slice(2);
 const ZH = args.includes("zh") || process.env.CLAUDE_SL_LANG === "zh";
 const DEMO = args.includes("demo");
@@ -34,9 +36,9 @@ const segs = (segArg === "all" ? ALL : segArg || "model,effort,5h,week")
   .filter(Boolean);
 const has = (s) => segs.includes(s);
 
-import { readFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
+import { readFileSync, writeFileSync, renameSync, mkdirSync } from "node:fs";
+import { homedir, hostname, platform } from "node:os";
+import { join, basename } from "node:path";
 
 const T = ZH
   ? {
@@ -101,6 +103,46 @@ function account(full) {
   }
 }
 
+// Each profile (config dir) drops its latest rate_limits into ~/.claude-usage/
+// so dashboard.mjs can show every account side by side. The key must be stable
+// per profile, so it prefers the config dir name over the (last-login) email.
+function snapshotKey() {
+  const override = process.env.CLAUDE_SL_ACCOUNT;
+  if (override) return override;
+  const dir = process.env.CLAUDE_CONFIG_DIR;
+  if (dir) return basename(dir.replace(/[\\/]+$/, ""));
+  return ".claude";
+}
+
+function writeSnapshot(input) {
+  if (DEMO || process.env.CLAUDE_SL_SNAPSHOT === "0") return;
+  if (!input?.rate_limits) return; // never clobber good data with an empty session
+  try {
+    const dir = process.env.CLAUDE_SL_USAGE_DIR || join(homedir(), ".claude-usage");
+    mkdirSync(dir, { recursive: true });
+    const key = snapshotKey();
+    const file = join(dir, key.replace(/[^\w.@-]+/g, "_") + ".json");
+    const snap = {
+      key,
+      email: account(true) || undefined,
+      configDir: process.env.CLAUDE_CONFIG_DIR || undefined,
+      // must match dashboard.mjs hostOfDir(), which labels WSL dirs "<distro> (wsl)"
+      host: process.env.WSL_DISTRO_NAME
+        ? `${process.env.WSL_DISTRO_NAME} (wsl)`
+        : `${hostname()} (${platform()})`,
+      model: input?.model?.display_name || undefined,
+      effort: input?.effort?.level || undefined,
+      rate_limits: input.rate_limits,
+      updatedAt: Date.now(),
+    };
+    const tmp = file + "." + process.pid + ".tmp";
+    writeFileSync(tmp, JSON.stringify(snap));
+    renameSync(tmp, file); // atomic-ish: readers never see a half-written file
+  } catch {
+    // snapshots are best-effort; the status line itself must never break
+  }
+}
+
 const DEMO_DATA = {
   model: { display_name: "Opus 4.8" },
   effort: { level: "high" },
@@ -124,6 +166,8 @@ try {
     const raw = ((await readStdin()) || "{}").replace(/^﻿/, "").trim() || "{}";
     input = JSON.parse(raw);
   }
+
+  writeSnapshot(input);
 
   const model = input?.model?.display_name || "Claude";
   const effort = input?.effort?.level;
