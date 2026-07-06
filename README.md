@@ -132,6 +132,12 @@ That absolute Linux path does not exist on native Windows, so the command fails 
 
 **Fix:** open the project's `.claude/settings.json` and `.claude/settings.local.json` and remove the `statusLine` block (so the user-level one applies again), **or** re-run the installer in the environment you actually use so the path matches. To confirm which command is live, check the `statusLine` value in each settings file from the most specific down.
 
+**The status line shows up, but some segments are missing / the language is wrong** — e.g. no account, or English where you configured Traditional Chinese. Not blank, just half-right.
+
+Same override as above, except this time the shadowing `statusLine` points at the *same script with stale arguments*. Say you later add arguments to the user-level command (e.g. `… statusline-limits.mjs zh all` to show Traditional Chinese + account), but some project's `.claude/settings.local.json` still holds the old argument-less command — that more specific entry wins, so the segments fall back to the default `model,effort,5h,week` (no account) and the language falls back to English. The command still runs, so nothing is blank; it's just missing pieces.
+
+**Fix:** same as above — delete the leftover `statusLine` from the project's `.claude/settings.*.json` (to fall back to the user-level one), or bring its arguments back in sync with the user-level command.
+
 ## Uninstall
 
 Remove the `statusLine` key from `~/.claude/settings.json` (and optionally delete `~/.claude/statusline-limits.mjs`).

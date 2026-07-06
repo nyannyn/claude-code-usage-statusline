@@ -131,6 +131,12 @@ $env:CLAUDE_SL_LANG="zh"; $env:CLAUDE_SL_SEGMENTS="all"; irm https://raw.githubu
 
 **修法:** 打開該專案的 `.claude/settings.json` 與 `.claude/settings.local.json`,把 `statusLine` 區塊刪掉(讓使用者層那筆重新生效),**或**在你實際使用的環境重跑一次安裝器讓路徑對上。想確認目前生效的是哪一條,就從最具體的設定檔由下往上檢查各檔的 `statusLine` 值。
 
+**狀態列有顯示,但缺了某些欄位 / 語言跑掉** — 例如少了帳號、或本該是繁中卻變回英文。這不是空白,是「對了一半」。
+
+一樣是上面那個 override 在作怪,只是這次那筆 `statusLine` 指到的是**同一支腳本、卻停在舊的呼叫參數**。假設你後來在使用者層把命令補上了參數(例如用 `… statusline-limits.mjs zh all` 顯示繁體中文＋帳號),但某個專案的 `.claude/settings.local.json` 還留著沒帶參數的舊命令——那筆較具體的設定會蓋過去,於是欄位退回預設的 `model,effort,5h,week`(不含 account)、語言也退回英文。命令本身跑得起來,所以畫面不空白,只是少了東西。
+
+**修法:** 同上——刪掉該專案 `.claude/settings.*.json` 裡殘留的 `statusLine`(回落到使用者層那筆),或把它的參數補齊、跟使用者層對上。
+
 ## 移除
 
 刪除 `~/.claude/settings.json` 中的 `statusLine` 鍵即可(並可一併刪除 `~/.claude/statusline-limits.mjs`)。
