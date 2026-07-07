@@ -276,8 +276,21 @@ const PAGE = `<!doctype html>
   .err { color:#e05d5d; font-size:12px; margin-top:8px; }
   .none { color:#8a919c; font-size:12.5px; }
   #empty { color:#8a919c; max-width:520px; line-height:1.6; }
+  .stale-card { opacity:.5; filter:grayscale(1); }
+  #summary { max-width:1100px; margin:0 0 20px; border:1px solid #2a313b; border-radius:12px; background:#1a1f26; padding:2px 16px; }
+  #summary:empty { display:none; }
+  #summary .shdr { color:#8a919c; font-size:11px; padding:10px 2px 2px; }
+  .srow { display:grid; grid-template-columns:minmax(84px,150px) 1fr 1fr auto; align-items:center; gap:16px; padding:9px 2px; border-top:1px solid #222831; font-size:12.5px; }
+  .shdr + .srow { border-top:0; }
+  .skey { font-weight:600; color:#e6e6e6; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .sseg { display:flex; align-items:center; gap:8px; color:#c8cdd4; min-width:0; }
+  .sseg .slbl { color:#8a919c; white-space:nowrap; }
+  .smini { flex:1; min-width:36px; height:6px; border-radius:3px; background:#2a313b; overflow:hidden; }
+  .smini > i { display:block; height:100%; border-radius:3px; }
+  .sval { white-space:nowrap; }
+  .sage { color:#8a919c; font-size:11px; white-space:nowrap; text-align:right; }
 </style></head><body>
-<h1>${T.title}</h1><div id="sub"></div><div id="cards"></div><div id="empty" hidden>${T.empty}</div>
+<h1>${T.title}</h1><div id="sub"></div><div id="summary"></div><div id="cards"></div><div id="empty" hidden>${T.empty}</div>
 <script>
 const T = ${JSON.stringify(T)};
 function cd(resetsAt){ if(!resetsAt) return ""; let s=resetsAt-Math.floor(Date.now()/1000);
@@ -294,18 +307,51 @@ function bar(label, w){
     (w.resets_at?' · '+T.reset+' '+cd(w.resets_at):'')+'</span></div>'+
     '<div class="bar"><div class="fill '+cls+'" style="width:'+used+'%"></div></div></div>';
 }
+// A snapshot is stale after 15 min without a fresh prompt in that account's window.
+function staleOf(a){ return !!(a.updatedAt && Date.now()-a.updatedAt > 15*60*1000); }
+// Compact bar for the per-account summary strip (fill = used%, text = remaining).
+function miniBar(w){
+  if(!w || w.used_percentage==null) return '<span class="smini"></span><span class="sval">—</span>';
+  const used=Math.min(100,Math.max(0,w.used_percentage)), left=(100-used).toFixed(0);
+  const cls = used>=90?"crit":used>=70?"warn":"ok";
+  return '<span class="smini"><i class="'+cls+'" style="width:'+used+'%"></i></span>'+
+    '<span class="sval">'+left+'%'+(w.resets_at?' · '+cd(w.resets_at):'')+'</span>';
+}
+// One row per account, keyed by login email (the real identity — the same
+// profile-dir name can be a different account on another host, so keying by dir
+// name alone could hide one). Machines merge: freshest wins, since 5h/weekly
+// quota is per-account, not per-machine. Fixed order by profile key.
+function summaryData(accounts){
+  const byAcct=new Map();
+  for(const a of accounts){ const id=a.email||a.key||"?"; const p=byAcct.get(id);
+    if(!p || (a.updatedAt||0)>(p.updatedAt||0)) byAcct.set(id,a); }
+  return [...byAcct.values()].sort((x,y)=>
+    String(x.key||"").localeCompare(String(y.key||"")) || String(x.email||"").localeCompare(String(y.email||"")));
+}
 async function refresh(){
   const r = await fetch("/api/usage"); const j = await r.json();
+  const zh = T.week==="週";
   document.getElementById("sub").textContent =
-    (T.week==="週"?"每 30 秒自動更新":"auto-refreshes every 30s") + (j.live?" · --live":"") + (j.demo?" · demo":"");
+    (zh?"每 30 秒自動更新":"auto-refreshes every 30s") + (j.live?" · --live":"") + (j.demo?" · demo":"");
+  const summary = document.getElementById("summary");
+  const srows = summaryData(j.accounts);
+  summary.innerHTML = srows.length ? '<div class="shdr">'+(zh?"每帳號最新用量":"latest per account")+'</div>'+
+    srows.map(a=>{ const rl=a.rate_limits||{};
+      return '<div class="srow'+(staleOf(a)?" stale-card":"")+'">'+
+        '<span class="skey">'+esc(a.key)+'</span>'+
+        '<span class="sseg"><span class="slbl">'+T.h5+'</span>'+miniBar(rl.five_hour)+'</span>'+
+        '<span class="sseg"><span class="slbl">'+T.week+'</span>'+miniBar(rl.seven_day)+'</span>'+
+        '<span class="sage">'+(a.updatedAt?T.updated+' '+ago(a.updatedAt)+(zh?"前":" ago"):'')+'</span>'+
+      '</div>'; }).join("") : "";
   const cards = document.getElementById("cards");
   document.getElementById("empty").hidden = j.accounts.length>0;
-  cards.innerHTML = j.accounts.map(a=>{
-    const staleMs = Date.now()-(a.updatedAt||0);
-    const stale = a.updatedAt && staleMs > 15*60*1000;
-    let h = '<div class="card"><h2>'+esc(a.key)+
+  // Stale cards sink to the bottom; filter keeps each group's collect() order (stable).
+  const ordered = [...j.accounts.filter(a=>!staleOf(a)), ...j.accounts.filter(staleOf)];
+  cards.innerHTML = ordered.map(a=>{
+    const stale = staleOf(a);
+    let h = '<div class="card'+(stale?" stale-card":"")+'"><h2>'+esc(a.key)+
       (a.source?'<span class="tag'+(stale?" stale":"")+'">'+(a.source==="live"?T.live:T.snap)+
-        (a.updatedAt?' · '+T.updated+' '+ago(a.updatedAt)+(T.week==="週"?"前":" ago"):'')+
+        (a.updatedAt?' · '+T.updated+' '+ago(a.updatedAt)+(zh?"前":" ago"):'')+
         (stale?' · '+T.stale:'')+'</span>':'')+'</h2>';
     h += '<div class="meta">'+esc([a.email, a.plan && (T.plan+": "+a.plan), a.model, a.host].filter(Boolean).join(" · "))+'</div>';
     const rl = a.rate_limits||{};
