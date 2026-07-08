@@ -98,6 +98,25 @@ profile's `.credentials.json` token locally; warn the user that the endpoint is
 undocumented and heavily rate-limited (results are cached 60s). See
 "Multi-account dashboard" in the README for env vars.
 
+**Organizing multiple accounts.** Help the user decide each account's role:
+
+- **Flex slot** — the default `~/.claude` (no `CLAUDE_CONFIG_DIR`). Disposable;
+  `/login` swaps whoever's in it. Best for throwaway / short-lived accounts.
+- **Fixed account** — its own dedicated `CLAUDE_CONFIG_DIR` (e.g. `~/.claude-work`),
+  logged in once. Stable identity, so the dashboard can track its quota over time.
+
+Rule of thumb: any account worth watching in the dashboard gets a fixed config
+dir; temporary ones stay in the flex slot.
+
+**Adding / removing accounts (the dashboard discovers them from files):**
+
+- Add: `CLAUDE_CONFIG_DIR=~/.claude-<name> claude` → `/login`; the card appears
+  once the status line renders in that window.
+- Remove: delete the config dir **and** its snapshot `~/.claude-usage/<profile>.json`
+  (basename of the config dir), or it lingers as a permanently stale grey card.
+  To hide without deleting, set `CLAUDE_SL_IGNORE` (profile key, `;`-separated) or
+  `CLAUDE_SL_MAX_AGE_DAYS` (drop snapshot-only cards older than N days).
+
 ## 5. If the status line stays blank afterwards
 
 A `statusLine` entry in a project's `.claude/settings.json` or

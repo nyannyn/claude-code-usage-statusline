@@ -105,6 +105,15 @@ curl -fsSL https://raw.githubusercontent.com/nyannyn/claude-code-usage-statuslin
 irm https://raw.githubusercontent.com/nyannyn/claude-code-usage-statusline/main/dashboard.mjs | node - demo
 ```
 
+### Organizing multiple accounts
+
+Two roles, and it helps to decide which each account plays:
+
+- **Flex slot** — the default `~/.claude` (no `CLAUDE_CONFIG_DIR` set). Disposable: `/login` swaps whoever's in it whenever you like. Good for a throwaway or short-lived account you don't want to track over time.
+- **Fixed account** — its own dedicated `CLAUDE_CONFIG_DIR` (e.g. `~/.claude-work`), logged in once. Stable identity, so the dashboard can follow its quota across sessions.
+
+Rule of thumb: give any account you want to **watch in the dashboard** a fixed config dir; leave temporary ones in the flex slot.
+
 **Real usage in 3 steps:**
 
 1. Give each account its own config dir and log in once per dir: `CLAUDE_CONFIG_DIR=~/.claude-b claude`
@@ -115,6 +124,11 @@ irm https://raw.githubusercontent.com/nyannyn/claude-code-usage-statusline/main/
 node ~/.claude/dashboard.mjs           # snapshots only, zero API calls
 node ~/.claude/dashboard.mjs --live    # + query Anthropic for accounts with no open window
 ```
+
+**Adding and removing accounts.** The dashboard discovers accounts from files, so there's nothing to register:
+
+- **Add:** `CLAUDE_CONFIG_DIR=~/.claude-<name> claude`, then `/login`. Its card appears the first time the status line renders in that window.
+- **Remove:** delete the config dir, then delete its snapshot `~/.claude-usage/<profile>.json` — otherwise the account lingers as a permanently stale (grey) card. The snapshot filename is the config dir's basename (`.claude-work.json`). To hide a card without deleting anything, use `CLAUDE_SL_IGNORE` (below), or set `CLAUDE_SL_MAX_AGE_DAYS` to drop cards you haven't used in a while.
 
 **How it gets the data — two sources, merged per profile:**
 
@@ -134,8 +148,10 @@ node dashboard.mjs --no-open         # don't auto-launch the browser
 | `CLAUDE_CONFIG_DIRS` | config dirs for `--live`, `;`-separated (default: every `~/.claude*` dir with a `.credentials.json`) |
 | `CLAUDE_SL_SNAPSHOT=0` | stop the status line from writing snapshots |
 | `CLAUDE_SL_USAGE_DIR` | where the status line writes snapshots (default `~/.claude-usage`) |
+| `CLAUDE_SL_IGNORE` | profile keys to hide, `;`-separated; matches `key` (`.claude-c`) or `key\|host` |
+| `CLAUDE_SL_MAX_AGE_DAYS` | hide snapshot-only cards not updated in N days (default `0` = keep forever; live cards are never aged out) |
 
-Profiles are identified by **config dir name + host**, because a Windows `.claude-b` and a WSL `.claude-b` can be different logins. Each card shows the profile's email (best effort — `.claude.json` only records the last login), plan, model, usage bars with reset countdowns, and per-model weekly caps in live mode.
+Profiles are identified by **config dir name + host**, because a Windows `.claude-b` and a WSL `.claude-b` can be different logins. Each card shows the profile's email (best effort — `.claude.json` only records the last login), plan, model, usage bars with reset countdowns, and per-model weekly caps in live mode. After you `/login` a *new* account into an existing config dir, that email only refreshes once that account renders the status line at least once, so the dashboard (and status line) may briefly show the previous login's address.
 
 ## How it works
 

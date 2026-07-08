@@ -23,6 +23,10 @@
 //                       plus every WSL distro's ~/.claude-usage when on Windows)
 //   CLAUDE_CONFIG_DIRS  config dirs to use for --live, ";"-separated (default:
 //                       every ~/.claude* dir that contains .credentials.json)
+//   CLAUDE_SL_IGNORE    profile keys to hide, ";"-separated; matches "key" or
+//                       "key|host" (drop a retired account without deleting files)
+//   CLAUDE_SL_MAX_AGE_DAYS  hide snapshot-only cards not updated in N days
+//                       (default 0 = keep forever; live cards are never aged out)
 import { createServer } from "node:http";
 import { readFileSync, readdirSync, existsSync, statSync } from "node:fs";
 import { homedir, platform, hostname } from "node:os";
@@ -244,14 +248,26 @@ async function collect() {
       else byKey.set(id, l);
     } else byKey.set(id, { ...byKey.get(id), ...l });
   }
-  return [...byKey.values()].sort((a, b) => idOf(a).localeCompare(idOf(b)));
+  // Accounts come and go; snapshots linger. CLAUDE_SL_IGNORE hides a profile by
+  // key (".claude-c") or key|host, and CLAUDE_SL_MAX_AGE_DAYS drops snapshot-only
+  // cards not seen in N days (0 = keep forever, the default). Live cards are never
+  // aged out — a fresh API answer proves the account is alive.
+  const ignore = new Set(
+    (process.env.CLAUDE_SL_IGNORE || "").split(";").map((s) => s.trim()).filter(Boolean)
+  );
+  const maxAgeMs = (Number(process.env.CLAUDE_SL_MAX_AGE_DAYS) || 0) * 86400 * 1000;
+  const now = Date.now();
+  return [...byKey.values()]
+    .filter((e) => !ignore.has(e.key) && !ignore.has(idOf(e)))
+    .filter((e) => !(maxAgeMs > 0 && e.source !== "live" && e.updatedAt && now - e.updatedAt > maxAgeMs))
+    .sort((a, b) => idOf(a).localeCompare(idOf(b)));
 }
 
 // ---------- web ----------
 
 const T = ZH
-  ? { title: "Claude 三帳號用量", h5: "5 小時", week: "週", reset: "重置", updated: "更新於", stale: "資料過舊", live: "即時", snap: "快照", none: "尚無資料 — 開一個該帳號的 Claude Code 視窗並送出一則訊息", empty: "找不到任何快照。先在各帳號跑過 statusline，或用 --live 啟動。", soon: "即將重置", ago: (s) => s, plan: "方案" }
-  : { title: "Claude Multi-Account Usage", h5: "5-hour", week: "Weekly", reset: "resets", updated: "updated", stale: "stale", live: "live", snap: "snapshot", none: "no data yet — open a Claude Code window on this account and send one message", empty: "No snapshots found. Run the statusline on each account first, or start with --live.", soon: "resetting", ago: (s) => s, plan: "plan" };
+  ? { title: "Claude 多帳號用量", h5: "5 小時", week: "週", updated: "更新於", live: "即時", cached: "快取", none: "尚無資料 — 開一個該帳號的 Claude Code 視窗並送出一則訊息", empty: "找不到任何快照。先在各帳號跑過 statusline，或用 --live 啟動。", soon: "即將重置", auto: "每 30 秒自動更新", acctWord: " 個帳號", left: "剩餘", resetPrefix: "重置於 ", agoTail: "前" }
+  : { title: "Claude Multi-Account Usage", h5: "5-hour", week: "Weekly", updated: "updated ", live: "live", cached: "cached", none: "no data yet — open a Claude Code window on this account and send one message", empty: "No snapshots found. Run the statusline on each account first, or start with --live.", soon: "resetting", auto: "auto-refreshes every 30s", acctWord: " accounts", left: "left", resetPrefix: "resets ", agoTail: " ago" };
 
 const PAGE = `<!doctype html>
 <html lang="${ZH ? "zh-Hant" : "en"}"><head><meta charset="utf-8">
