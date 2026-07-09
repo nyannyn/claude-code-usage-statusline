@@ -92,7 +92,7 @@ $env:CLAUDE_SL_LANG="zh"; $env:CLAUDE_SL_SEGMENTS="all"; irm https://raw.githubu
 
 ## Multi-account dashboard
 
-Running several Claude subscriptions (e.g. one `CLAUDE_CONFIG_DIR` per account)? The dashboard shows **every account's 5-hour and weekly quota side by side** in your browser — one card per profile, with usage bars, reset countdowns, email/plan/model, and data freshness. Auto-refreshes every 30 seconds.
+Running several Claude subscriptions (e.g. one `CLAUDE_CONFIG_DIR` per account)? The dashboard shows **every account's 5-hour and weekly quota side by side** in your browser — one row per profile, grouped into a table per machine, with usage bars, reset countdowns, email/plan/model, and data freshness. Auto-refreshes every 30 seconds.
 
 **Try it right now** (fake data, reads nothing, no install):
 

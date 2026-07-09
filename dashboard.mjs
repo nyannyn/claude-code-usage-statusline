@@ -141,6 +141,10 @@ function hostOfDir(dir) {
   return m ? `${m[1]} (wsl)` : `${hostname()} (${platform()})`;
 }
 
+// last successful live entry per dir, so a transient 429 / network blip falls
+// back to the previous numbers instead of blanking the card.
+const lastGood = new Map();
+
 async function fetchLiveOne(dir) {
   const key = basename(dir);
   const host = hostOfDir(dir);
@@ -159,9 +163,21 @@ async function fetchLiveOne(dir) {
       },
       signal: AbortSignal.timeout(10000),
     });
-    if (res.status === 429)
-      return { key, host, source: "live", error: "endpoint rate-limited (429), retry later" };
-    if (!res.ok) return { key, host, source: "live", error: `HTTP ${res.status}` };
+    if (res.status === 429) {
+      // don't blank the panel on a transient limit — keep the last good numbers,
+      // and signal fetchLive() to back off so we stop hammering the endpoint.
+      const prev = lastGood.get(dir);
+      const retryAfter = Number(res.headers.get("retry-after")) || 0;
+      return prev
+        ? { ...prev, liveError: "rate-limited (429) · showing last known", rateLimited: true, retryAfter }
+        : { key, host, source: "live", error: "endpoint rate-limited (429), retry later", rateLimited: true, retryAfter };
+    }
+    if (!res.ok) {
+      const prev = lastGood.get(dir);
+      return prev
+        ? { ...prev, liveError: `HTTP ${res.status} · showing last known` }
+        : { key, host, source: "live", error: `HTTP ${res.status}` };
+    }
     const u = await res.json();
     const win = (w) =>
       w && w.utilization != null
@@ -175,27 +191,49 @@ async function fetchLiveOne(dir) {
         used_percentage: l.percent,
         resets_at: isoToEpoch(l.resets_at),
       }));
-    return {
+    const entry = {
       key,
       host,
       email: liveEmail(dir),
       configDir: dir,
       plan: oauth.subscriptionType,
       source: "live",
+      // token expiry — a later value means a more recently refreshed (fresher)
+      // token, which is how the dashboard ranks which machine to show first.
+      tokenExpiresAt: oauth.expiresAt,
       rate_limits: { five_hour: win(u.five_hour), seven_day: win(u.seven_day) },
       scoped,
       updatedAt: Date.now(),
     };
+    lastGood.set(dir, entry); // remember good data to fall back on during a 429
+    return entry;
   } catch (e) {
-    return { key, host, source: "live", error: String(e.message).slice(0, 80) };
+    const prev = lastGood.get(dir);
+    const msg = String(e.message).slice(0, 80);
+    return prev ? { ...prev, liveError: `${msg} · showing last known` } : { key, host, source: "live", error: msg };
   }
 }
 
-let liveCache = { at: 0, data: [] };
+// The usage endpoint rate-limits hard, so be conservative: refresh at most every
+// few minutes, fetch accounts one at a time instead of bursting them all at once,
+// and after a 429 back off for longer. Quotas move slowly enough to stay fresh.
+const LIVE_TTL = 5 * 60_000;      // normal minimum gap between endpoint sweeps
+const BACKOFF_TTL = 15 * 60_000;  // longer gap once we've been rate-limited
+let liveCache = { at: 0, data: [], nextAllowed: 0 };
 async function fetchLive() {
-  if (Date.now() - liveCache.at < 60_000) return liveCache.data; // be gentle: 60s cache
-  const data = await Promise.all(configDirs().map(fetchLiveOne));
-  liveCache = { at: Date.now(), data };
+  const now = Date.now();
+  const fresh = now - liveCache.at < LIVE_TTL;
+  const backingOff = now < liveCache.nextAllowed;
+  if ((fresh || backingOff) && liveCache.data.length) return liveCache.data;
+  // sequential with a small gap, so we never fire every account simultaneously
+  const data = [];
+  for (const dir of configDirs()) {
+    data.push(await fetchLiveOne(dir));
+    await new Promise((r) => setTimeout(r, 300));
+  }
+  const hitLimit = data.some((d) => d.rateLimited);
+  const retryAfterMs = Math.max(0, ...data.map((d) => (d.retryAfter || 0) * 1000));
+  liveCache = { at: now, data, nextAllowed: hitLimit ? now + Math.max(BACKOFF_TTL, retryAfterMs) : 0 };
   return data;
 }
 
@@ -218,17 +256,36 @@ function demoAccounts() {
     ...extra,
   });
   return [
-    acct(".claude", "work@example.com", 13, 38),
-    acct(".claude-b", "side@example.com", 71, 52, { source: "live",
+    acct(".claude", "work@example.com", 13, 38, { host: "ubuntu (wsl)" }),
+    acct(".claude-b", "side@example.com", 71, 52, { host: "ubuntu (wsl)", source: "live",
       scoped: [{ label: "Opus", used_percentage: 64, resets_at: now + 4 * 86400 }] }),
-    acct(".claude-c", "play@example.com", 96, 88),
+    acct(".claude-c", "play@example.com", 96, 88, { host: "desktop (win32)",
+      updatedAt: Date.now() - 26 * 3600 * 1000 }),
   ];
 }
 
 // ---------- merge ----------
 
+// Rank machines by the freshest token/snapshot they hold, so the box you most
+// recently used floats to the top, and keep every account grouped under its own
+// machine (accounts of one host stay contiguous for the section dividers).
+function sortByFreshHost(arr) {
+  const recency = (e) => e.tokenExpiresAt || e.updatedAt || 0;
+  const hostScore = new Map();
+  for (const e of arr) {
+    const h = e.host || "?";
+    hostScore.set(h, Math.max(hostScore.get(h) || 0, recency(e)));
+  }
+  return arr.sort((a, b) => {
+    const ha = a.host || "?", hb = b.host || "?";
+    if (ha !== hb)
+      return (hostScore.get(hb) || 0) - (hostScore.get(ha) || 0) || ha.localeCompare(hb);
+    return recency(b) - recency(a) || (a.key || "").localeCompare(b.key || "");
+  });
+}
+
 async function collect() {
-  if (DEMO) return demoAccounts();
+  if (DEMO) return sortByFreshHost(demoAccounts());
   const snaps = readSnapshots();
   const live = LIVE ? await fetchLive() : [];
   // One card per profile. Dir names repeat across Windows/WSL with different
@@ -257,125 +314,138 @@ async function collect() {
   );
   const maxAgeMs = (Number(process.env.CLAUDE_SL_MAX_AGE_DAYS) || 0) * 86400 * 1000;
   const now = Date.now();
-  return [...byKey.values()]
+  const kept = [...byKey.values()]
     .filter((e) => !ignore.has(e.key) && !ignore.has(idOf(e)))
-    .filter((e) => !(maxAgeMs > 0 && e.source !== "live" && e.updatedAt && now - e.updatedAt > maxAgeMs))
-    .sort((a, b) => idOf(a).localeCompare(idOf(b)));
+    .filter((e) => !(maxAgeMs > 0 && e.source !== "live" && e.updatedAt && now - e.updatedAt > maxAgeMs));
+  return sortByFreshHost(kept);
 }
 
 // ---------- web ----------
 
 const T = ZH
-  ? { title: "Claude 多帳號用量", h5: "5 小時", week: "週", updated: "更新於", live: "即時", cached: "快取", none: "尚無資料 — 開一個該帳號的 Claude Code 視窗並送出一則訊息", empty: "找不到任何快照。先在各帳號跑過 statusline，或用 --live 啟動。", soon: "即將重置", auto: "每 30 秒自動更新", acctWord: " 個帳號", left: "剩餘", resetPrefix: "重置於 ", agoTail: "前" }
-  : { title: "Claude Multi-Account Usage", h5: "5-hour", week: "Weekly", updated: "updated ", live: "live", cached: "cached", none: "no data yet — open a Claude Code window on this account and send one message", empty: "No snapshots found. Run the statusline on each account first, or start with --live.", soon: "resetting", auto: "auto-refreshes every 30s", acctWord: " accounts", left: "left", resetPrefix: "resets ", agoTail: " ago" };
+  ? { title: "Claude 多帳號用量", h5: "5 小時", week: "週", updated: "更新於", live: "即時", cached: "快取", none: "尚無資料 — 開一個該帳號的 Claude Code 視窗並送出一則訊息", empty: "找不到任何快照。先在各帳號跑過 statusline，或用 --live 啟動。", soon: "即將重置", auto: "每 30 秒自動更新", acctWord: " 個帳號", left: "已用", resetPrefix: "重置於 ", agoTail: "前" }
+  : { title: "Claude Multi-Account Usage", h5: "5-hour", week: "Weekly", updated: "updated ", live: "live", cached: "cached", none: "no data yet — open a Claude Code window on this account and send one message", empty: "No snapshots found. Run the statusline on each account first, or start with --live.", soon: "resetting", auto: "auto-refreshes every 30s", acctWord: " accounts", left: "used", resetPrefix: "resets ", agoTail: " ago" };
 
 const PAGE = `<!doctype html>
 <html lang="${ZH ? "zh-Hant" : "en"}"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${T.title}</title>
 <style>
-  :root { color-scheme: dark; }
-  body { font-family: system-ui, "Segoe UI", sans-serif; background:#111418; color:#e6e6e6; margin:0; padding:24px; }
-  h1 { font-size:18px; font-weight:600; margin:0 0 4px; }
-  #sub { color:#8a919c; font-size:12px; margin-bottom:20px; }
-  #cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:16px; max-width:1100px; }
-  .card { background:#1a1f26; border:1px solid #2a313b; border-radius:12px; padding:16px 18px; }
-  .card h2 { font-size:15px; margin:0; font-weight:600; }
-  .meta { color:#8a919c; font-size:11.5px; margin:2px 0 12px; }
-  .row { margin:10px 0; }
-  .lbl { display:flex; justify-content:space-between; font-size:12.5px; margin-bottom:4px; color:#c8cdd4; }
-  .bar { height:8px; border-radius:4px; background:#2a313b; overflow:hidden; }
-  .fill { height:100%; border-radius:4px; transition:width .4s; }
-  .ok { background:#3fb960; } .warn { background:#e0a93e; } .crit { background:#e05d5d; }
-  .tag { font-size:10px; padding:1px 7px; border-radius:9px; border:1px solid #3a424d; color:#9aa3ae; margin-left:8px; vertical-align:1px; }
-  .stale { color:#e0a93e; border-color:#e0a93e; }
-  .err { color:#e05d5d; font-size:12px; margin-top:8px; }
-  .none { color:#8a919c; font-size:12.5px; }
-  #empty { color:#8a919c; max-width:520px; line-height:1.6; }
-  .stale-card { opacity:.5; filter:grayscale(1); }
-  #summary { max-width:1100px; margin:0 0 20px; border:1px solid #2a313b; border-radius:12px; background:#1a1f26; padding:2px 16px; }
-  #summary:empty { display:none; }
-  #summary .shdr { color:#8a919c; font-size:11px; padding:10px 2px 2px; }
-  .srow { display:grid; grid-template-columns:minmax(84px,150px) 1fr 1fr auto; align-items:center; gap:16px; padding:9px 2px; border-top:1px solid #222831; font-size:12.5px; }
-  .shdr + .srow { border-top:0; }
-  .skey { font-weight:600; color:#e6e6e6; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .sseg { display:flex; align-items:center; gap:8px; color:#c8cdd4; min-width:0; }
-  .sseg .slbl { color:#8a919c; white-space:nowrap; }
-  .smini { flex:1; min-width:36px; height:6px; border-radius:3px; background:#2a313b; overflow:hidden; }
-  .smini > i { display:block; height:100%; border-radius:3px; }
-  .sval { white-space:nowrap; }
-  .sage { color:#8a919c; font-size:11px; white-space:nowrap; text-align:right; }
+  :root { color-scheme: dark;
+    --bg:oklch(20% 0.012 260); --panel:oklch(25% 0.012 260); --pill:oklch(28% 0.012 260);
+    --track:oklch(35% 0.012 260); --line:oklch(100% 0 0 / .06); --rowline:oklch(100% 0 0 / .05);
+    --t0:oklch(97% 0.01 260); --t1:oklch(90% 0.01 260); --t2:oklch(65% 0.02 260);
+    --t3:oklch(60% 0.02 260); --t4:oklch(58% 0.02 260); --t5:oklch(52% 0.02 260);
+    --red:oklch(70% 0.17 25); --yel:oklch(78% 0.14 85); --grn:oklch(75% 0.15 150);
+    --pulse:oklch(72% 0.17 150); --amber:oklch(70% 0.13 85);
+  }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
+  body { margin:0; min-height:100vh; background:var(--bg); color:var(--t0);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
+    padding:clamp(16px,4vw,40px) clamp(12px,4vw,32px) 80px; display:flex; justify-content:center; box-sizing:border-box; }
+  #wrap { width:100%; max-width:1180px; }
+  h1 { margin:0 0 6px; font-size:clamp(20px,4vw,26px); font-weight:700; letter-spacing:-.01em; }
+  #sub { display:flex; align-items:center; gap:6px; color:var(--t2); font-size:13px; margin-bottom:28px; }
+  #sub svg { opacity:.8; }
+  .dot { width:5px; height:5px; border-radius:50%; background:var(--pulse); display:inline-block; animation:pulse 2s ease-in-out infinite; }
+  .livetxt { color:var(--pulse); font-weight:600; }
+  .grp { margin-bottom:36px; }
+  .ghdr { display:flex; align-items:center; gap:10px; margin-bottom:14px; color:var(--t2); }
+  .gname { font-size:15px; font-weight:600; color:var(--t1); }
+  .gcount { font-size:12px; color:var(--t3); background:var(--pill); padding:2px 9px; border-radius:20px; }
+  .gtable { background:var(--panel); border:1px solid var(--line); border-radius:12px; overflow:hidden; }
+  .rrow { display:flex; flex-wrap:wrap; align-items:center; gap:16px 24px; padding:16px 20px; border-bottom:1px solid var(--rowline); }
+  .rrow:last-child { border-bottom:0; }
+  .acell { min-width:200px; flex:1 1 240px; max-width:320px; display:flex; gap:10px; }
+  .avatar { flex:none; width:34px; height:34px; border-radius:50%; display:flex; align-items:center; justify-content:center;
+    font-size:12.5px; font-weight:700; color:oklch(98% 0.005 260); letter-spacing:.01em; }
+  .ainfo { min-width:0; flex:1 1 auto; }
+  .aline { display:flex; align-items:center; gap:7px; flex-wrap:wrap; margin-bottom:4px; }
+  .aname { font-size:14px; font-weight:600; color:oklch(95% 0.01 260); font-family:ui-monospace,Menlo,monospace; }
+  .badge { font-size:10.5px; font-weight:600; padding:2px 8px; border-radius:20px; }
+  .bplan { background:oklch(45% 0.09 275 / .22); color:oklch(78% 0.09 275); }
+  .bmodel { background:oklch(50% 0.02 260 / .3); color:oklch(75% 0.02 260); }
+  .aemail { font-size:12px; color:var(--t3); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-bottom:5px; }
+  .astatus { display:flex; align-items:center; gap:5px; font-size:11.5px; color:var(--t3); }
+  .astatus.stale { color:var(--amber); }
+  .aerr { display:flex; align-items:center; gap:5px; font-size:11px; color:var(--red); margin-top:4px; }
+  .mcell { flex:1 1 130px; min-width:120px; }
+  .mtop { display:flex; justify-content:space-between; align-items:baseline; gap:8px; margin-bottom:6px; }
+  .mlbl { font-size:11.5px; color:var(--t4); white-space:nowrap; }
+  .mval { font-size:13px; font-weight:700; white-space:nowrap; }
+  .mbar { height:6px; border-radius:4px; background:var(--track); overflow:hidden; margin-bottom:6px; }
+  .mbar i { display:block; height:100%; border-radius:4px; }
+  .msub { font-size:11px; color:var(--t5); }
+  .none { flex:1 1 260px; color:var(--t3); font-size:12.5px; }
+  #empty { color:var(--t3); max-width:520px; line-height:1.6; }
 </style></head><body>
-<h1>${T.title}</h1><div id="sub"></div><div id="summary"></div><div id="cards"></div><div id="empty" hidden>${T.empty}</div>
+<div id="wrap"><h1>${T.title}</h1><div id="sub"></div><div id="groups"></div><div id="empty" hidden>${T.empty}</div></div>
 <script>
 const T = ${JSON.stringify(T)};
+const I = {
+  spin:'<svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M12 5V3M12 21v-2M5 12H3M21 12h-2M6.3 6.3 4.9 4.9M19.1 19.1l-1.4-1.4M6.3 17.7l-1.4 1.4M19.1 4.9l-1.4 1.4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M12 7a5 5 0 1 0 5 5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
+  mon:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none"><rect x="3" y="4" width="18" height="12" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="M9 20h6M12 16v4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
+  clock:'<svg width="12" height="12" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.8"/><path d="M12 7v5l3.2 2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
+  warn:'<svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M12 3 22 20H2Z" fill="currentColor" opacity=".18" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M12 9v5M12 17.5v.1" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
+};
 function cd(resetsAt){ if(!resetsAt) return ""; let s=resetsAt-Math.floor(Date.now()/1000);
   if(s<=0) return T.soon; const d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60);
   return d>0? d+"d"+h+"h" : h>0? h+"h"+m+"m" : m+"m"; }
 function ago(ms){ const s=Math.floor((Date.now()-ms)/1000);
   return s<60? s+"s" : s<3600? Math.floor(s/60)+"m" : s<86400? Math.floor(s/3600)+"h" : Math.floor(s/86400)+"d"; }
 function esc(x){ return String(x==null?"":x).replace(/[&<>"]/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
-function bar(label, w){
-  if(!w || w.used_percentage==null) return "";
-  const used=Math.min(100,Math.max(0,w.used_percentage)), left=(100-used).toFixed(0);
-  const cls = used>=90?"crit":used>=70?"warn":"ok";
-  return '<div class="row"><div class="lbl"><span>'+esc(label)+'</span><span>'+left+'% '+(T.week==="週"?"剩餘":"left")+
-    (w.resets_at?' · '+T.reset+' '+cd(w.resets_at):'')+'</span></div>'+
-    '<div class="bar"><div class="fill '+cls+'" style="width:'+used+'%"></div></div></div>';
-}
 // A snapshot is stale after 15 min without a fresh prompt in that account's window.
 function staleOf(a){ return !!(a.updatedAt && Date.now()-a.updatedAt > 15*60*1000); }
-// Compact bar for the per-account summary strip (fill = used%, text = remaining).
-function miniBar(w){
-  if(!w || w.used_percentage==null) return '<span class="smini"></span><span class="sval">—</span>';
-  const used=Math.min(100,Math.max(0,w.used_percentage)), left=(100-used).toFixed(0);
-  const cls = used>=90?"crit":used>=70?"warn":"ok";
-  return '<span class="smini"><i class="'+cls+'" style="width:'+used+'%"></i></span>'+
-    '<span class="sval">'+left+'%'+(w.resets_at?' · '+cd(w.resets_at):'')+'</span>';
+// Deterministic avatar hue from the account identity, so colors are stable across reloads.
+function hueOf(s){ let h=0; for(let i=0;i<s.length;i++) h=(h*31+s.charCodeAt(i))>>>0; return h%360; }
+// One metric cell: used% (bold, traffic-light color — more used = redder),
+// bar filled to used, reset countdown.
+function metricCell(label, w){
+  if(!w || w.used_percentage==null) return "";
+  const used=Math.round(Math.min(100,Math.max(0,w.used_percentage)));
+  const c = used>=80?"var(--red)":used>=50?"var(--yel)":"var(--grn)";
+  const t = w.resets_at?cd(w.resets_at):"";
+  return '<div class="mcell"><div class="mtop"><span class="mlbl">'+esc(label)+'</span>'+
+    '<span class="mval" style="color:'+c+'">'+used+'%</span></div>'+
+    '<div class="mbar"><i style="width:'+used+'%;background:'+c+'"></i></div>'+
+    '<div class="msub">'+T.left+(t?' · '+(t===T.soon?t:T.resetPrefix+t):'')+'</div></div>';
 }
-// One row per account, keyed by login email (the real identity — the same
-// profile-dir name can be a different account on another host, so keying by dir
-// name alone could hide one). Machines merge: freshest wins, since 5h/weekly
-// quota is per-account, not per-machine. Fixed order by profile key.
-function summaryData(accounts){
-  const byAcct=new Map();
-  for(const a of accounts){ const id=a.email||a.key||"?"; const p=byAcct.get(id);
-    if(!p || (a.updatedAt||0)>(p.updatedAt||0)) byAcct.set(id,a); }
-  return [...byAcct.values()].sort((x,y)=>
-    String(x.key||"").localeCompare(String(y.key||"")) || String(x.email||"").localeCompare(String(y.email||"")));
+function row(a){
+  const stale = staleOf(a);
+  const id = a.email||a.key||"?";
+  const init = esc(String(a.email||String(a.key||"?").replace(/^\\./,"")).slice(0,2).toUpperCase());
+  let h = '<div class="rrow"><div class="acell">'+
+    '<div class="avatar" style="background:oklch(58% 0.14 '+hueOf(id)+')">'+init+'</div><div class="ainfo">'+
+    '<div class="aline"><span class="aname">'+esc(a.key)+'</span>'+
+    (a.plan?'<span class="badge bplan">'+esc(a.plan)+'</span>':'')+
+    (a.model?'<span class="badge bmodel">'+esc(a.model)+'</span>':'')+'</div>'+
+    (a.email?'<div class="aemail">'+esc(a.email)+'</div>':'')+
+    '<div class="astatus'+(stale?' stale':'')+'">'+(stale?I.warn:I.clock)+'<span>'+
+      (stale?T.cached:T.live)+(a.updatedAt?' · '+T.updated+ago(a.updatedAt)+T.agoTail:'')+'</span></div>'+
+    ((a.liveError||a.error)?'<div class="aerr">'+I.warn+'<span>'+esc(a.liveError||a.error)+'</span></div>':'')+
+    '</div></div>';
+  const rl = a.rate_limits||{};
+  const cells = metricCell(T.h5, rl.five_hour) + metricCell(T.week, rl.seven_day) +
+    (a.scoped||[]).map(s=>metricCell(s.label, s)).join("");
+  h += cells || '<div class="none">'+T.none+'</div>';
+  return h+'</div>';
 }
 async function refresh(){
   const r = await fetch("/api/usage"); const j = await r.json();
-  const zh = T.week==="週";
-  document.getElementById("sub").textContent =
-    (zh?"每 30 秒自動更新":"auto-refreshes every 30s") + (j.live?" · --live":"") + (j.demo?" · demo":"");
-  const summary = document.getElementById("summary");
-  const srows = summaryData(j.accounts);
-  summary.innerHTML = srows.length ? '<div class="shdr">'+(zh?"每帳號最新用量":"latest per account")+'</div>'+
-    srows.map(a=>{ const rl=a.rate_limits||{};
-      return '<div class="srow'+(staleOf(a)?" stale-card":"")+'">'+
-        '<span class="skey">'+esc(a.key)+'</span>'+
-        '<span class="sseg"><span class="slbl">'+T.h5+'</span>'+miniBar(rl.five_hour)+'</span>'+
-        '<span class="sseg"><span class="slbl">'+T.week+'</span>'+miniBar(rl.seven_day)+'</span>'+
-        '<span class="sage">'+(a.updatedAt?T.updated+' '+ago(a.updatedAt)+(zh?"前":" ago"):'')+'</span>'+
-      '</div>'; }).join("") : "";
-  const cards = document.getElementById("cards");
+  document.getElementById("sub").innerHTML = I.spin+'<span>'+T.auto+'</span>'+
+    (j.live?'<span class="dot"></span><span class="livetxt">live</span>':'')+
+    (j.demo?'<span>· demo</span>':'');
   document.getElementById("empty").hidden = j.accounts.length>0;
-  // Stale cards sink to the bottom; filter keeps each group's collect() order (stable).
-  const ordered = [...j.accounts.filter(a=>!staleOf(a)), ...j.accounts.filter(staleOf)];
-  cards.innerHTML = ordered.map(a=>{
-    const stale = staleOf(a);
-    let h = '<div class="card'+(stale?" stale-card":"")+'"><h2>'+esc(a.key)+
-      (a.source?'<span class="tag'+(stale?" stale":"")+'">'+(a.source==="live"?T.live:T.snap)+
-        (a.updatedAt?' · '+T.updated+' '+ago(a.updatedAt)+(zh?"前":" ago"):'')+
-        (stale?' · '+T.stale:'')+'</span>':'')+'</h2>';
-    h += '<div class="meta">'+esc([a.email, a.plan && (T.plan+": "+a.plan), a.model, a.host].filter(Boolean).join(" · "))+'</div>';
-    const rl = a.rate_limits||{};
-    const bars = bar(T.h5, rl.five_hour) + bar(T.week, rl.seven_day) +
-      (a.scoped||[]).map(s=>bar(T.week+" · "+s.label, s)).join("");
-    h += bars || '<div class="none">'+T.none+'</div>';
-    if(a.liveError||a.error) h += '<div class="err">live: '+esc(a.liveError||a.error)+'</div>';
-    return h+'</div>';
+  // One table per machine. collect() already orders accounts freshest-host-first
+  // and keeps each host's rows contiguous, so Map insertion order is the order we
+  // render — the box you most recently used floats to the top.
+  const groups = new Map();
+  for(const a of j.accounts){ const g=a.host||"?"; if(!groups.has(g)) groups.set(g,[]); groups.get(g).push(a); }
+  document.getElementById("groups").innerHTML = [...groups.keys()].map(n=>{
+    const rows = groups.get(n);
+    return '<div class="grp"><div class="ghdr">'+I.mon+'<span class="gname">'+esc(n)+'</span>'+
+      '<span class="gcount">'+rows.length+T.acctWord+'</span></div>'+
+      '<div class="gtable">'+rows.map(row).join("")+'</div></div>';
   }).join("");
 }
 refresh(); setInterval(refresh, 30000);
