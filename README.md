@@ -92,7 +92,7 @@ $env:CLAUDE_SL_LANG="zh"; $env:CLAUDE_SL_SEGMENTS="all"; irm https://raw.githubu
 
 ## Multi-account dashboard
 
-Running several Claude subscriptions (e.g. one `CLAUDE_CONFIG_DIR` per account)? The dashboard shows **every account's 5-hour and weekly quota side by side** in your browser — one row per profile, grouped into a table per machine, with usage bars, reset countdowns, email/plan/model, and data freshness. Auto-refreshes every 30 seconds.
+Running several Claude subscriptions (e.g. one `CLAUDE_CONFIG_DIR` per account)? The dashboard shows **every account's 5-hour and weekly quota side by side** in your browser — one card per account, merged by email across machines, in a single flat list, with usage bars, reset countdowns, email/plan/model, and data freshness. If the same account is also logged in on another machine (or WSL), that copy doesn't get its own card — it shows up as an "others" status line under the main card instead. Auto-refreshes every 30 seconds.
 
 **Try it right now** (fake data, reads nothing, no install):
 
@@ -140,7 +140,10 @@ node ~/.claude/dashboard.mjs --live    # + query Anthropic for accounts with no 
 node dashboard.mjs zh --live          # snapshots + live polling
 node dashboard.mjs --port 8080       # custom port
 node dashboard.mjs --no-open         # don't auto-launch the browser
+node dashboard.mjs --takeover        # if the port is taken, ask the running instance to shut down and take over
 ```
+
+**Running it as a background/startup service.** `--takeover` lets you register the dashboard as a startup item without worrying about "port already in use" — the new instance POSTs `/api/shutdown` to whichever instance is already listening, waits for it to exit, and then binds the port itself. On Windows, a simple way to get this running at login: put a shortcut in your Startup folder (`shell:startup`) that runs `wscript.exe` against a tiny `.vbs` wrapper (so no console window flashes) invoking `node dashboard.mjs --takeover --no-open`; each login (or manual re-run after an upgrade) then cleanly replaces the previous instance instead of failing to bind.
 
 | env var | meaning |
 | --- | --- |
@@ -151,7 +154,7 @@ node dashboard.mjs --no-open         # don't auto-launch the browser
 | `CLAUDE_SL_IGNORE` | profile keys to hide, `;`-separated; matches `key` (`.claude-c`) or `key\|host` |
 | `CLAUDE_SL_MAX_AGE_DAYS` | hide snapshot-only cards not updated in N days (default `0` = keep forever; live cards are never aged out) |
 
-Profiles are identified by **config dir name + host**, because a Windows `.claude-b` and a WSL `.claude-b` can be different logins. Each card shows the profile's email (best effort — `.claude.json` only records the last login), plan, model, usage bars with reset countdowns, and per-model weekly caps in live mode. After you `/login` a *new* account into an existing config dir, that email only refreshes once that account renders the status line at least once, so the dashboard (and status line) may briefly show the previous login's address.
+Profiles are identified by **config dir name + host** underneath, because a Windows `.claude-b` and a WSL `.claude-b` can be different logins — but since quota belongs to the account, not the machine, entries sharing an email are merged into one card, and every other machine's copy is folded into that card's "others" list instead of getting a card of its own. Each card shows the account's email (best effort — `.claude.json` only records the last login), plan, model, usage bars with reset countdowns, and per-model weekly caps in live mode. After you `/login` a *new* account into an existing config dir, that email only refreshes once that account renders the status line at least once, so the dashboard (and status line) may briefly show the previous login's address.
 
 ## How it works
 

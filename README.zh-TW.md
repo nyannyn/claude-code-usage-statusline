@@ -91,7 +91,7 @@ $env:CLAUDE_SL_LANG="zh"; $env:CLAUDE_SL_SEGMENTS="all"; irm https://raw.githubu
 
 ## 多帳號儀表板
 
-同時養好幾個 Claude 訂閱帳號(例如每個帳號各一個 `CLAUDE_CONFIG_DIR`)?儀表板讓你在瀏覽器裡**一頁看齊所有帳號的 5 小時與每週額度**——每個 profile 一張卡:用量條、重置倒數、email/方案/模型、資料新鮮度,每 30 秒自動更新。
+同時養好幾個 Claude 訂閱帳號(例如每個帳號各一個 `CLAUDE_CONFIG_DIR`)?儀表板讓你在瀏覽器裡**一頁看齊所有帳號的 5 小時與每週額度**——每個帳號一張卡(跨機器以 email 合併,單一扁平清單):用量條、重置倒數、email/方案/模型、資料新鮮度,每 30 秒自動更新。若同一帳號也登入在另一台機器(或 WSL),那份不會另開一張卡,而是併進主卡底下的「其他」狀態列。
 
 **現在就試**(假資料、不讀任何東西、免安裝):
 
@@ -125,7 +125,10 @@ node ~/.claude/dashboard.mjs zh --live    # + 向 Anthropic 查沒開視窗的�
 node dashboard.mjs zh --live         # 快照 + 即時查詢
 node dashboard.mjs zh --port 8080    # 自訂 port
 node dashboard.mjs zh --no-open      # 不自動開瀏覽器
+node dashboard.mjs zh --takeover     # port 被占用時,請求該實例關閉(POST /api/shutdown)並接手
 ```
+
+**當成背景/開機常駐服務執行。** `--takeover` 讓你把儀表板註冊成開機啟動項目時,不用擔心「port 已被占用」——新實例會對現有實例發送 `/api/shutdown`,等它結束後再自己綁定該 port。在 Windows 上,一種簡單做法是在啟動資料夾(`shell:startup`)放一個捷徑,透過 `wscript.exe` 執行一個極簡的 `.vbs` wrapper(不跳出主控台視窗)呼叫 `node dashboard.mjs --takeover --no-open`;之後每次登入(或升級後手動重跑)都會乾淨地取代前一個實例,不會卡在綁定失敗。
 
 | 環境變數 | 意義 |
 | --- | --- |
@@ -134,7 +137,7 @@ node dashboard.mjs zh --no-open      # 不自動開瀏覽器
 | `CLAUDE_SL_SNAPSHOT=0` | 停用狀態列寫快照 |
 | `CLAUDE_SL_USAGE_DIR` | 狀態列寫快照的位置(預設 `~/.claude-usage`) |
 
-Profile 的識別是 **config 目錄名 + 主機**,因為 Windows 的 `.claude-b` 和 WSL 的 `.claude-b` 可能登入不同帳號。卡片上的 email 僅供參考(`.claude.json` 只記最後一次登入);即時模式還會顯示各模型的每週上限。
+底層 profile 的識別是 **config 目錄名 + 主機**,因為 Windows 的 `.claude-b` 和 WSL 的 `.claude-b` 可能登入不同帳號——但額度屬於帳號而非機器,所以 email 相同的項目會合併成一張卡,其他機器上的同帳號副本只會併入該卡的「其他」清單,不會另外開卡。卡片上的 email 僅供參考(`.claude.json` 只記最後一次登入);即時模式還會顯示各模型的每週上限。
 
 ## 運作方式
 

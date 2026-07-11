@@ -9,6 +9,10 @@
 //      <config-dir>/.credentials.json and asks Anthropic's usage endpoint
 //      directly. Fresh even for idle accounts, but the endpoint rate-limits
 //      hard, so results are cached for 60s and fetched at most once per load.
+// Quota belongs to the account, not the machine, so entries sharing an email
+// (e.g. the same login on Windows and WSL) are merged into one card; the
+// other machine's copy is listed under "others" on that card instead of
+// getting a card of its own.
 //
 // Usage:
 //   node dashboard.mjs               start on http://localhost:3777 and open it
@@ -17,6 +21,8 @@
 //   node dashboard.mjs --port 8080   custom port
 //   node dashboard.mjs --no-open     don't launch the browser
 //   node dashboard.mjs demo          render three fake accounts (preview, reads nothing)
+//   node dashboard.mjs --takeover    if the port is taken, ask that instance to
+//                                    shut down (POST /api/shutdown) and take it over
 //
 // Env vars:
 //   CLAUDE_USAGE_DIRS   extra snapshot dirs, ";"-separated (default ~/.claude-usage,
@@ -40,6 +46,7 @@ const LIVE = !DEMO && args.includes("--live");
 const OPEN = !args.includes("--no-open");
 const portIdx = args.indexOf("--port");
 const PORT = portIdx >= 0 ? Number(args[portIdx + 1]) || 3777 : 3777;
+const TAKEOVER = args.includes("--takeover");
 const WIN = platform() === "win32";
 
 // ---------- snapshot source ----------
@@ -256,9 +263,13 @@ function demoAccounts() {
     ...extra,
   });
   return [
-    acct(".claude", "work@example.com", 13, 38, { host: "ubuntu (wsl)" }),
-    acct(".claude-b", "side@example.com", 71, 52, { host: "ubuntu (wsl)", source: "live",
-      scoped: [{ label: "Opus", used_percentage: 64, resets_at: now + 4 * 86400 }] }),
+    // Same email, two machines — the live/fresh Windows copy should become the
+    // merged card, the stale WSL copy (with an expired-token error) should land
+    // in that card's "others" list instead of getting a card of its own.
+    acct(".claude", "work@example.com", 13, 38, { host: "desktop (win32)", source: "live" }),
+    { key: ".claude", host: "ubuntu (wsl)", email: "work@example.com", source: "live",
+      error: "token expired (open Claude Code once to refresh)",
+      updatedAt: Date.now() - 2 * 3600 * 1000 },
     acct(".claude-c", "play@example.com", 96, 88, { host: "desktop (win32)",
       updatedAt: Date.now() - 26 * 3600 * 1000 }),
   ];
@@ -266,26 +277,41 @@ function demoAccounts() {
 
 // ---------- merge ----------
 
-// Rank machines by the freshest token/snapshot they hold, so the box you most
-// recently used floats to the top, and keep every account grouped under its own
-// machine (accounts of one host stay contiguous for the section dividers).
-function sortByFreshHost(arr) {
-  const recency = (e) => e.tokenExpiresAt || e.updatedAt || 0;
-  const hostScore = new Map();
+// A single value used everywhere to rank "how fresh is this entry": a live
+// token's expiry if we have one (a later value means a more recently
+// refreshed, fresher token), else the last update timestamp.
+const recency = (e) => e.tokenExpiresAt || e.updatedAt || 0;
+
+// Quota is per-account, not per-machine, so entries sharing an email collapse
+// into one card. Pick the freshest rate_limits-bearing entry as the card
+// (falling back to plain recency if the whole group is error-only), and file
+// every other entry from that email under "others" so its host/error is still
+// visible without spawning a second card. Entries with no email (shouldn't
+// normally happen) never merge — each stays its own card.
+function mergeByEmail(arr) {
+  const byEmail = new Map();
+  const solo = [];
   for (const e of arr) {
-    const h = e.host || "?";
-    hostScore.set(h, Math.max(hostScore.get(h) || 0, recency(e)));
+    if (!e.email) { solo.push(e); continue; }
+    if (!byEmail.has(e.email)) byEmail.set(e.email, []);
+    byEmail.get(e.email).push(e);
   }
-  return arr.sort((a, b) => {
-    const ha = a.host || "?", hb = b.host || "?";
-    if (ha !== hb)
-      return (hostScore.get(hb) || 0) - (hostScore.get(ha) || 0) || ha.localeCompare(hb);
-    return recency(b) - recency(a) || (a.key || "").localeCompare(b.key || "");
-  });
+  const merged = [...solo];
+  for (const group of byEmail.values()) {
+    const withLimits = group.filter((e) => e.rate_limits);
+    const pickFrom = withLimits.length ? withLimits : group;
+    const main = pickFrom.reduce((best, e) => (recency(e) > recency(best) ? e : best));
+    const others = group
+      .filter((e) => e !== main)
+      .map((e) => ({ host: e.host, key: e.key, error: e.liveError || e.error, updatedAt: e.updatedAt }))
+      .sort((a, b) => recency(b) - recency(a));
+    merged.push(others.length ? { ...main, others } : main);
+  }
+  return merged.sort((a, b) => recency(b) - recency(a));
 }
 
 async function collect() {
-  if (DEMO) return sortByFreshHost(demoAccounts());
+  if (DEMO) return mergeByEmail(demoAccounts());
   const snaps = readSnapshots();
   const live = LIVE ? await fetchLive() : [];
   // One card per profile. Dir names repeat across Windows/WSL with different
@@ -317,7 +343,7 @@ async function collect() {
   const kept = [...byKey.values()]
     .filter((e) => !ignore.has(e.key) && !ignore.has(idOf(e)))
     .filter((e) => !(maxAgeMs > 0 && e.source !== "live" && e.updatedAt && now - e.updatedAt > maxAgeMs));
-  return sortByFreshHost(kept);
+  return mergeByEmail(kept);
 }
 
 // ---------- web ----------
@@ -325,6 +351,7 @@ async function collect() {
 const T = ZH
   ? { title: "Claude 多帳號用量", h5: "5 小時", week: "週", updated: "更新於", live: "即時", cached: "快取", none: "尚無資料 — 開一個該帳號的 Claude Code 視窗並送出一則訊息", empty: "找不到任何快照。先在各帳號跑過 statusline，或用 --live 啟動。", soon: "即將重置", auto: "每 30 秒自動更新", acctWord: " 個帳號", left: "已用", resetPrefix: "重置於 ", agoTail: "前" }
   : { title: "Claude Multi-Account Usage", h5: "5-hour", week: "Weekly", updated: "updated ", live: "live", cached: "cached", none: "no data yet — open a Claude Code window on this account and send one message", empty: "No snapshots found. Run the statusline on each account first, or start with --live.", soon: "resetting", auto: "auto-refreshes every 30s", acctWord: " accounts", left: "used", resetPrefix: "resets ", agoTail: " ago" };
+// acctWord doubles as the header's "N accounts" label above the single flat list.
 
 const PAGE = `<!doctype html>
 <html lang="${ZH ? "zh-Hant" : "en"}"><head><meta charset="utf-8">
@@ -369,6 +396,7 @@ const PAGE = `<!doctype html>
   .astatus { display:flex; align-items:center; gap:5px; font-size:11.5px; color:var(--t3); }
   .astatus.stale { color:var(--amber); }
   .aerr { display:flex; align-items:center; gap:5px; font-size:11px; color:var(--red); margin-top:4px; }
+  .aother { display:flex; align-items:center; gap:5px; font-size:11px; color:var(--t5); margin-top:4px; }
   .mcell { flex:1 1 130px; min-width:120px; }
   .mtop { display:flex; justify-content:space-between; align-items:baseline; gap:8px; margin-bottom:6px; }
   .mlbl { font-size:11.5px; color:var(--t4); white-space:nowrap; }
@@ -421,8 +449,15 @@ function row(a){
     (a.model?'<span class="badge bmodel">'+esc(a.model)+'</span>':'')+'</div>'+
     (a.email?'<div class="aemail">'+esc(a.email)+'</div>':'')+
     '<div class="astatus'+(stale?' stale':'')+'">'+(stale?I.warn:I.clock)+'<span>'+
-      (stale?T.cached:T.live)+(a.updatedAt?' · '+T.updated+ago(a.updatedAt)+T.agoTail:'')+'</span></div>'+
+      (stale?T.cached:T.live)+(a.updatedAt?' · '+T.updated+ago(a.updatedAt)+T.agoTail:'')+
+      (a.host?' · '+esc(a.host):'')+'</span></div>'+
     ((a.liveError||a.error)?'<div class="aerr">'+I.warn+'<span>'+esc(a.liveError||a.error)+'</span></div>':'')+
+    (a.others||[]).map(o=>
+      o.error
+        ? '<div class="aerr">'+I.warn+'<span>'+esc(o.host)+' · '+esc(o.key)+': '+esc(o.error)+'</span></div>'
+        : '<div class="aother">'+I.clock+'<span>'+esc(o.host)+' · '+esc(o.key)+': '+T.cached+
+          (o.updatedAt?' · '+ago(o.updatedAt)+T.agoTail:'')+'</span></div>'
+    ).join("")+
     '</div></div>';
   const rl = a.rate_limits||{};
   const cells = metricCell(T.h5, rl.five_hour) + metricCell(T.week, rl.seven_day) +
@@ -436,24 +471,26 @@ async function refresh(){
     (j.live?'<span class="dot"></span><span class="livetxt">live</span>':'')+
     (j.demo?'<span>· demo</span>':'');
   document.getElementById("empty").hidden = j.accounts.length>0;
-  // One table per machine. collect() already orders accounts freshest-host-first
-  // and keeps each host's rows contiguous, so Map insertion order is the order we
-  // render — the box you most recently used floats to the top.
-  const groups = new Map();
-  for(const a of j.accounts){ const g=a.host||"?"; if(!groups.has(g)) groups.set(g,[]); groups.get(g).push(a); }
-  document.getElementById("groups").innerHTML = [...groups.keys()].map(n=>{
-    const rows = groups.get(n);
-    return '<div class="grp"><div class="ghdr">'+I.mon+'<span class="gname">'+esc(n)+'</span>'+
-      '<span class="gcount">'+rows.length+T.acctWord+'</span></div>'+
-      '<div class="gtable">'+rows.map(row).join("")+'</div></div>';
-  }).join("");
+  // One card per account (collect() already merged same-email entries across
+  // machines), ordered freshest-first — the account you most recently used
+  // floats to the top.
+  document.getElementById("groups").innerHTML =
+    '<div class="grp"><div class="ghdr">'+I.mon+'<span class="gname">'+esc(T.title)+'</span>'+
+    '<span class="gcount">'+j.accounts.length+T.acctWord+'</span></div>'+
+    '<div class="gtable">'+j.accounts.map(row).join("")+'</div></div>';
 }
 refresh(); setInterval(refresh, 30000);
 </script></body></html>`;
 
 const server = createServer(async (req, res) => {
   try {
-    if (req.url.startsWith("/api/usage")) {
+    if (req.method === "POST" && req.url.startsWith("/api/shutdown")) {
+      // Lets a --takeover instance ask us to step aside instead of both
+      // fighting over the port. Bound to 127.0.0.1 already, so no extra origin check.
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ ok: true }));
+      setTimeout(() => process.exit(0), 100);
+    } else if (req.url.startsWith("/api/usage")) {
       const accounts = await collect();
       res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
       res.end(JSON.stringify({ live: LIVE, demo: DEMO, accounts }));
@@ -474,8 +511,55 @@ function openBrowser() {
   exec(cmd, () => {});
 }
 
-server.on("error", (e) => {
+async function tryTakeover() {
+  // Ask the running instance to shut down, then retry binding a few times —
+  // it needs a moment to actually exit after acking the request. We can't use
+  // the HTTP response to judge success (old instances 200 every path), so
+  // success is defined purely as "we managed to listen()".
+  try {
+    await fetch(`http://localhost:${PORT}/api/shutdown`, {
+      method: "POST",
+      signal: AbortSignal.timeout(2000),
+    });
+  } catch {}
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    await new Promise((r) => setTimeout(r, 1000));
+    const ok = await new Promise((resolve) => {
+      // Swap out the main error handler for the duration of this attempt so a
+      // failed retry doesn't re-enter (and recurse through) the outer handler.
+      server.removeListener("error", onServerError);
+      server.once("error", () => {
+        server.on("error", onServerError);
+        resolve(false);
+      });
+      server.listen(PORT, "127.0.0.1", () => {
+        server.on("error", onServerError);
+        resolve(true);
+      });
+    });
+    if (ok) return true;
+  }
+  return false;
+}
+
+function onServerError(e) {
   if (e.code === "EADDRINUSE") {
+    if (TAKEOVER) {
+      tryTakeover().then((ok) => {
+        if (ok) {
+          console.log(`${T.title}: ${url}${LIVE ? "  (--live)" : ""}${DEMO ? "  (demo)" : ""}  (takeover)`);
+          if (OPEN) openBrowser();
+        } else {
+          console.log(
+            ZH
+              ? `接手失敗：舊實例不支援 takeover，請手動結束該 node 程序。`
+              : `Takeover failed: the running instance doesn't support takeover — please end that node process manually.`
+          );
+          setTimeout(() => process.exit(1), 15000);
+        }
+      });
+      return;
+    }
     // A dashboard is already serving this port (e.g. the desktop shortcut was
     // double-clicked twice, or claude-trio started one) — just show that one.
     console.log(ZH ? `儀表板已在 ${url} 執行中,直接開啟。` : `Dashboard already running at ${url}, opening it.`);
@@ -485,7 +569,8 @@ server.on("error", (e) => {
   }
   console.error(String(e.stack || e));
   setTimeout(() => process.exit(1), 15000); // keep the window up long enough to read the error
-});
+}
+server.on("error", onServerError);
 
 server.listen(PORT, "127.0.0.1", () => {
   console.log(`${T.title}: ${url}${LIVE ? "  (--live)" : ""}${DEMO ? "  (demo)" : ""}`);
