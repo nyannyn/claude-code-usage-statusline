@@ -373,8 +373,8 @@ async function collect() {
 // ---------- web ----------
 
 const T = ZH
-  ? { title: "Claude 多帳號用量", h5: "5 小時", week: "週", updated: "更新於", live: "即時", cached: "快取", none: "尚無資料 — 開一個該帳號的 Claude Code 視窗並送出一則訊息", empty: "找不到任何快照。先在各帳號跑過 statusline，或用 --live 啟動。", soon: "即將重置", auto: "每 30 秒自動更新", acctWord: " 個帳號", left: "已用", resetPrefix: "重置於 ", agoTail: "前" }
-  : { title: "Claude Multi-Account Usage", h5: "5-hour", week: "Weekly", updated: "updated ", live: "live", cached: "cached", none: "no data yet — open a Claude Code window on this account and send one message", empty: "No snapshots found. Run the statusline on each account first, or start with --live.", soon: "resetting", auto: "auto-refreshes every 30s", acctWord: " accounts", left: "used", resetPrefix: "resets ", agoTail: " ago" };
+  ? { title: "Claude 多帳號用量", h5: "5 小時", week: "週", updated: "更新於", live: "即時", cached: "快取", none: "尚無資料 — 開一個該帳號的 Claude Code 視窗並送出一則訊息", empty: "找不到任何快照。先在各帳號跑過 statusline，或用 --live 啟動。", soon: "即將重置", expired: "已重置，等待新資料", auto: "每 30 秒自動更新", acctWord: " 個帳號", left: "已用", resetPrefix: "重置於 ", agoTail: "前" }
+  : { title: "Claude Multi-Account Usage", h5: "5-hour", week: "Weekly", updated: "updated ", live: "live", cached: "cached", none: "no data yet — open a Claude Code window on this account and send one message", empty: "No snapshots found. Run the statusline on each account first, or start with --live.", soon: "resetting", expired: "reset — awaiting fresh data", auto: "auto-refreshes every 30s", acctWord: " accounts", left: "used", resetPrefix: "resets ", agoTail: " ago" };
 // acctWord doubles as the header's "N accounts" label above the single flat list.
 
 const PAGE = `<!doctype html>
@@ -454,6 +454,14 @@ function hueOf(s){ let h=0; for(let i=0;i<s.length;i++) h=(h*31+s.charCodeAt(i))
 // bar filled to used, reset countdown.
 function metricCell(label, w){
   if(!w || w.used_percentage==null) return "";
+  // A snapshot outlives the window it measured. Once resets_at has passed the
+  // quota rolled over, so the stored used% describes a window that no longer
+  // exists — and we can't know what's been spent since. Say so instead of
+  // guessing (0% would read as "quota free", the old number as "quota gone").
+  if(w.resets_at && w.resets_at <= Math.floor(Date.now()/1000))
+    return '<div class="mcell"><div class="mtop"><span class="mlbl">'+esc(label)+'</span>'+
+      '<span class="mval" style="color:var(--t4)">—</span></div>'+
+      '<div class="mbar"></div><div class="msub">'+T.expired+'</div></div>';
   const used=Math.round(Math.min(100,Math.max(0,w.used_percentage)));
   const c = used>=80?"var(--red)":used>=50?"var(--yel)":"var(--grn)";
   const t = w.resets_at?cd(w.resets_at):"";
