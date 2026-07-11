@@ -142,10 +142,16 @@ function liveEmail(dir) {
 }
 
 // Windows and WSL profiles can share a dir name (".claude-b") yet be logged
-// into different accounts, so the host is part of an entry's identity.
+// into different accounts, so the host is part of an entry's identity. The label
+// must come out identical whether the dashboard runs on Windows (seeing the
+// distro as a \\wsl$ UNC path) or inside the distro itself (seeing a plain
+// /home path), or live entries won't merge with the snapshots that
+// statusline-limits.mjs wrote under "<distro> (wsl)".
 function hostOfDir(dir) {
   const m = /^\\\\wsl\$\\([^\\]+)/.exec(dir);
-  return m ? `${m[1]} (wsl)` : `${hostname()} (${platform()})`;
+  if (m) return `${m[1]} (wsl)`;
+  if (process.env.WSL_DISTRO_NAME) return `${process.env.WSL_DISTRO_NAME} (wsl)`;
+  return `${hostname()} (${platform()})`;
 }
 
 // last successful live entry per dir, so a transient 429 / network blip falls

@@ -133,7 +133,8 @@ function writeSnapshot(input) {
       // or the dashboard can't group this profile with others per account
       email: (override?.includes("@") ? override : configEmail()) || undefined,
       configDir: process.env.CLAUDE_CONFIG_DIR || undefined,
-      // must match dashboard.mjs hostOfDir(), which labels WSL dirs "<distro> (wsl)"
+      // must match dashboard.mjs hostOfDir(): a WSL profile is "<distro> (wsl)"
+      // whether the dashboard reads it from inside the distro or from Windows
       host: process.env.WSL_DISTRO_NAME
         ? `${process.env.WSL_DISTRO_NAME} (wsl)`
         : `${hostname()} (${platform()})`,
