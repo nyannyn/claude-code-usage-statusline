@@ -39,13 +39,18 @@
 //                       "key|host" (drop a retired account without deleting files)
 //   CLAUDE_SL_MAX_AGE_DAYS  hide snapshot-only cards not updated in N days
 //                       (default 0 = keep forever; live cards are never aged out)
+//   CLAUDE_USAGE_DOCS_DIR  local markdown docs dir; when set, the dashboard serves
+//                       it read-only at /docs (rendered) and links it from the
+//                       header. Unset = the route and the link don't exist. Lets
+//                       you keep private runbooks next to the dashboard without
+//                       putting any of their content in this repo.
 import { createServer } from "node:http";
 import {
   readFileSync, readdirSync, existsSync, statSync,
   writeFileSync, unlinkSync, mkdirSync, openSync,
 } from "node:fs";
 import { homedir, platform, hostname } from "node:os";
-import { join, basename } from "node:path";
+import { join, basename, resolve, sep } from "node:path";
 import { execFileSync, exec, spawn } from "node:child_process";
 import { connect } from "node:net";
 import { fileURLToPath } from "node:url";
@@ -58,6 +63,18 @@ const OPEN = !args.includes("--no-open");
 const portIdx = args.indexOf("--port");
 const PORT = portIdx >= 0 ? Number(args[portIdx + 1]) || 3777 : 3777;
 const TAKEOVER = args.includes("--takeover");
+// Optional local docs dir (see header). Resolved once; "~" works like the shell.
+const DOCS_DIR = (() => {
+  let d = process.env.CLAUDE_USAGE_DOCS_DIR;
+  if (!d) return null;
+  if (d === "~" || d.startsWith("~/") || d.startsWith("~\\")) d = join(homedir(), d.slice(1));
+  try {
+    d = resolve(d);
+    return statSync(d).isDirectory() ? d : null;
+  } catch {
+    return null;
+  }
+})();
 const DAEMON = args.includes("--daemon");
 const STOP = args.includes("--stop");
 const STATUS = args.includes("--status");
@@ -430,8 +447,8 @@ async function collect() {
 // ---------- web ----------
 
 const T = ZH
-  ? { title: "Claude 多帳號用量", h5: "5 小時", week: "週", updated: "更新於", live: "即時", cached: "快取", none: "尚無資料 — 開一個該帳號的 Claude Code 視窗並送出一則訊息", empty: "找不到任何快照。先在各帳號跑過 statusline，或用 --live 啟動。", soon: "即將重置", expired: "已重置，等待新資料", auto: "每 30 秒自動更新", acctWord: " 個帳號", left: "已用", resetPrefix: "重置於 ", agoTail: "前" }
-  : { title: "Claude Multi-Account Usage", h5: "5-hour", week: "Weekly", updated: "updated ", live: "live", cached: "cached", none: "no data yet — open a Claude Code window on this account and send one message", empty: "No snapshots found. Run the statusline on each account first, or start with --live.", soon: "resetting", expired: "reset — awaiting fresh data", auto: "auto-refreshes every 30s", acctWord: " accounts", left: "used", resetPrefix: "resets ", agoTail: " ago" };
+  ? { title: "Claude 多帳號用量", h5: "5 小時", week: "週", updated: "更新於", live: "即時", cached: "快取", none: "尚無資料 — 開一個該帳號的 Claude Code 視窗並送出一則訊息", empty: "找不到任何快照。先在各帳號跑過 statusline，或用 --live 啟動。", soon: "即將重置", expired: "已重置，等待新資料", auto: "每 30 秒自動更新", acctWord: " 個帳號", left: "已用", resetPrefix: "重置於 ", agoTail: "前", docs: "說明書", docsBack: "← 說明書目錄", dashBack: "← 儀表板", docsEmpty: "目錄裡沒有 .md 檔。", docsMissing: "找不到這份文件。" }
+  : { title: "Claude Multi-Account Usage", h5: "5-hour", week: "Weekly", updated: "updated ", live: "live", cached: "cached", none: "no data yet — open a Claude Code window on this account and send one message", empty: "No snapshots found. Run the statusline on each account first, or start with --live.", soon: "resetting", expired: "reset — awaiting fresh data", auto: "auto-refreshes every 30s", acctWord: " accounts", left: "used", resetPrefix: "resets ", agoTail: " ago", docs: "Docs", docsBack: "← doc index", dashBack: "← dashboard", docsEmpty: "No .md files in the docs dir.", docsMissing: "Document not found." };
 // acctWord doubles as the header's "N accounts" label above the single flat list.
 
 const PAGE = `<!doctype html>
@@ -563,7 +580,8 @@ async function refresh(){
   const r = await fetch("/api/usage"); const j = await r.json();
   document.getElementById("sub").innerHTML = I.spin+'<span>'+T.auto+'</span>'+
     (j.live?'<span class="dot"></span><span class="livetxt">live</span>':'')+
-    (j.demo?'<span>· demo</span>':'');
+    (j.demo?'<span>· demo</span>':'')+
+    (j.docs?'<span>·</span><a href="/docs" style="color:var(--t2)">'+T.docs+'</a>':'');
   document.getElementById("empty").hidden = j.accounts.length>0;
   // One card per account (collect() already merged same-email entries across
   // machines), ordered freshest-first — the account you most recently used
@@ -576,6 +594,160 @@ async function refresh(){
 refresh(); setInterval(refresh, 30000);
 </script></body></html>`;
 
+// ---------- /docs (optional, CLAUDE_USAGE_DOCS_DIR) ----------
+// Read-only viewer for a local markdown dir. Content never enters this repo;
+// the dir is the single source of truth, so the page is always current.
+
+function listDocs(dir, prefix = "") {
+  const out = [];
+  let names;
+  try {
+    names = readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return out;
+  }
+  for (const e of names) {
+    if (e.name.startsWith(".")) continue;
+    if (e.isDirectory()) out.push(...listDocs(join(dir, e.name), prefix + e.name + "/"));
+    else if (e.name.endsWith(".md")) out.push(prefix + e.name);
+  }
+  return out.sort();
+}
+
+// Rel path from the URL → absolute file inside DOCS_DIR, or null. The server is
+// loopback-only, but a traversal guard costs three lines, so it's here anyway.
+function docPath(rel) {
+  if (!DOCS_DIR || !rel || !rel.endsWith(".md")) return null;
+  const abs = resolve(DOCS_DIR, rel);
+  if (abs !== DOCS_DIR && !abs.startsWith(DOCS_DIR + sep)) return null;
+  return abs;
+}
+
+// Small GFM subset: headings, fenced code, tables, lists, quotes, hr, bold,
+// inline code, links. Everything else stays literal text. Escapes first, so
+// nothing in the .md can inject markup.
+function mdToHtml(src, curDir) {
+  const escMd = (s) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const inline = (s) => escMd(s)
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (m, t, u) => {
+      if (/^(https?:)/.test(u)) return `<a href="${u}" target="_blank" rel="noopener">${t}</a>`;
+      if (u.endsWith(".md")) {
+        // Relative doc link — resolve against the current doc's subdir.
+        const rel = (u.startsWith("/") ? u.slice(1) : (curDir ? curDir + "/" : "") + u).replace(/\/[^/]+\/\.\.\//g, "/");
+        return `<a href="/docs?f=${encodeURIComponent(rel)}">${t}</a>`;
+      }
+      return t;
+    });
+  const lines = src.replace(/\r\n/g, "\n").split("\n");
+  const out = [];
+  let i = 0, list = null, para = [];
+  const flushPara = () => { if (para.length) { out.push("<p>" + para.map(inline).join(" ") + "</p>"); para = []; } };
+  const flushList = () => { if (list) { out.push(`</${list}>`); list = null; } };
+  while (i < lines.length) {
+    const l = lines[i];
+    if (/^```/.test(l)) {
+      flushPara(); flushList();
+      const buf = [];
+      for (i++; i < lines.length && !/^```/.test(lines[i]); i++) buf.push(lines[i]);
+      i++;
+      out.push("<pre><code>" + escMd(buf.join("\n")) + "</code></pre>");
+      continue;
+    }
+    const h = /^(#{1,6})\s+(.*)$/.exec(l);
+    if (h) { flushPara(); flushList(); out.push(`<h${h[1].length}>${inline(h[2])}</h${h[1].length}>`); i++; continue; }
+    if (/^\s*\|.*\|\s*$/.test(l) && i + 1 < lines.length && /^\s*\|[\s:|-]+\|\s*$/.test(lines[i + 1])) {
+      flushPara(); flushList();
+      const cells = (row) => row.trim().replace(/^\||\|$/g, "").split("|").map((c) => inline(c.trim()));
+      out.push("<table><thead><tr>" + cells(l).map((c) => `<th>${c}</th>`).join("") + "</tr></thead><tbody>");
+      for (i += 2; i < lines.length && /^\s*\|.*\|\s*$/.test(lines[i]); i++)
+        out.push("<tr>" + cells(lines[i]).map((c) => `<td>${c}</td>`).join("") + "</tr>");
+      out.push("</tbody></table>");
+      continue;
+    }
+    const li = /^\s*(?:[-*]|(\d+)\.)\s+(.*)$/.exec(l);
+    if (li) {
+      flushPara();
+      const want = li[1] ? "ol" : "ul";
+      if (list !== want) { flushList(); out.push(`<${want}>`); list = want; }
+      out.push("<li>" + inline(li[2]) + "</li>"); i++; continue;
+    }
+    if (/^\s*>\s?/.test(l)) {
+      flushPara(); flushList();
+      const buf = [];
+      for (; i < lines.length && /^\s*>\s?/.test(lines[i]); i++) buf.push(lines[i].replace(/^\s*>\s?/, ""));
+      out.push("<blockquote><p>" + buf.map(inline).join(" ") + "</p></blockquote>");
+      continue;
+    }
+    if (/^\s*(---+|\*\*\*+)\s*$/.test(l)) { flushPara(); flushList(); out.push("<hr>"); i++; continue; }
+    if (/^\s*$/.test(l)) { flushPara(); flushList(); i++; continue; }
+    para.push(l.trim()); i++;
+  }
+  flushPara(); flushList();
+  return out.join("\n");
+}
+
+// Same palette as the dashboard so the two read as one tool.
+function docsPage(title, nav, body) {
+  return `<!doctype html>
+<html lang="${ZH ? "zh-Hant" : "en"}"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${title}</title>
+<style>
+  :root { color-scheme: dark;
+    --bg:oklch(20% 0.012 260); --panel:oklch(25% 0.012 260); --line:oklch(100% 0 0 / .06);
+    --t0:oklch(97% 0.01 260); --t1:oklch(90% 0.01 260); --t2:oklch(65% 0.02 260);
+    --t3:oklch(60% 0.02 260); --link:oklch(75% 0.1 250);
+  }
+  body { margin:0; min-height:100vh; background:var(--bg); color:var(--t1);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
+    padding:clamp(16px,4vw,40px) clamp(12px,4vw,32px) 80px; display:flex; justify-content:center; box-sizing:border-box;
+    font-size:14.5px; line-height:1.7; }
+  #wrap { width:100%; max-width:860px; }
+  nav { margin-bottom:24px; font-size:13px; }
+  nav a { margin-right:14px; }
+  a { color:var(--link); text-decoration:none; }
+  a:hover { text-decoration:underline; }
+  h1,h2,h3,h4 { color:var(--t0); letter-spacing:-.01em; line-height:1.35; }
+  h1 { font-size:24px; } h2 { font-size:19px; margin-top:2em; } h3 { font-size:16px; }
+  code { background:var(--panel); border:1px solid var(--line); border-radius:5px;
+    padding:1px 5px; font-family:ui-monospace,Menlo,monospace; font-size:.92em; }
+  pre { background:var(--panel); border:1px solid var(--line); border-radius:10px;
+    padding:14px 16px; overflow-x:auto; }
+  pre code { background:none; border:0; padding:0; }
+  table { border-collapse:collapse; width:100%; margin:1em 0; font-size:13.5px; }
+  th,td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+  th { color:var(--t0); background:var(--panel); }
+  blockquote { margin:1em 0; padding:2px 16px; border-left:3px solid var(--line); color:var(--t3); }
+  hr { border:0; border-top:1px solid var(--line); margin:2em 0; }
+  ul,ol { padding-left:1.5em; }
+  .doclist a { display:block; padding:10px 16px; background:var(--panel);
+    border:1px solid var(--line); border-radius:10px; margin-bottom:8px;
+    font-family:ui-monospace,Menlo,monospace; font-size:13.5px; }
+</style></head><body><div id="wrap"><nav>${nav}</nav>${body}</div></body></html>`;
+}
+
+function serveDocs(req, res) {
+  const q = new URL(req.url, "http://x").searchParams;
+  const rel = q.get("f");
+  res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+  if (!rel) {
+    const files = listDocs(DOCS_DIR);
+    const body = `<h1>${T.docs}</h1>` + (files.length
+      ? '<div class="doclist">' + files.map((f) => `<a href="/docs?f=${encodeURIComponent(f)}">${f}</a>`).join("") + "</div>"
+      : `<p>${T.docsEmpty}</p>`);
+    res.end(docsPage(T.docs, `<a href="/">${T.dashBack}</a>`, body));
+    return;
+  }
+  const abs = docPath(rel);
+  let src = null;
+  if (abs) { try { src = readFileSync(abs, "utf8"); } catch {} }
+  const nav = `<a href="/">${T.dashBack}</a><a href="/docs">${T.docsBack}</a>`;
+  res.end(docsPage(basename(rel, ".md"), nav,
+    src == null ? `<p>${T.docsMissing}</p>` : mdToHtml(src.replace(/^﻿/, ""), rel.includes("/") ? rel.slice(0, rel.lastIndexOf("/")) : "")));
+}
+
 const server = createServer(async (req, res) => {
   try {
     if (req.method === "POST" && req.url.startsWith("/api/shutdown")) {
@@ -587,7 +759,9 @@ const server = createServer(async (req, res) => {
     } else if (req.url.startsWith("/api/usage")) {
       const accounts = await collect();
       res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-      res.end(JSON.stringify({ live: LIVE, demo: DEMO, accounts }));
+      res.end(JSON.stringify({ live: LIVE, demo: DEMO, docs: !!DOCS_DIR, accounts }));
+    } else if (req.url.startsWith("/docs") && DOCS_DIR) {
+      serveDocs(req, res);
     } else {
       res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
       res.end(PAGE);
