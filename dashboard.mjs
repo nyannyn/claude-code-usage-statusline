@@ -23,6 +23,12 @@
 //   node dashboard.mjs demo          render three fake accounts (preview, reads nothing)
 //   node dashboard.mjs --takeover    if the port is taken, ask that instance to
 //                                    shut down (POST /api/shutdown) and take it over
+//   node dashboard.mjs --daemon      run detached, so it survives closing the terminal
+//   node dashboard.mjs --status      is a daemon serving this port?
+//   node dashboard.mjs --stop        stop the daemon on this port
+//
+// A daemon outlives its shell but not the machine: `wsl --shutdown`, a logout or
+// a reboot ends it, and you start it again the same way.
 //
 // Env vars:
 //   CLAUDE_USAGE_DIRS   extra snapshot dirs, ";"-separated (default ~/.claude-usage,
@@ -34,10 +40,15 @@
 //   CLAUDE_SL_MAX_AGE_DAYS  hide snapshot-only cards not updated in N days
 //                       (default 0 = keep forever; live cards are never aged out)
 import { createServer } from "node:http";
-import { readFileSync, readdirSync, existsSync, statSync } from "node:fs";
+import {
+  readFileSync, readdirSync, existsSync, statSync,
+  writeFileSync, unlinkSync, mkdirSync, openSync,
+} from "node:fs";
 import { homedir, platform, hostname } from "node:os";
 import { join, basename } from "node:path";
-import { execFileSync, exec } from "node:child_process";
+import { execFileSync, exec, spawn } from "node:child_process";
+import { connect } from "node:net";
+import { fileURLToPath } from "node:url";
 
 const args = process.argv.slice(2);
 const ZH = args.includes("zh") || process.env.CLAUDE_SL_LANG === "zh";
@@ -47,6 +58,9 @@ const OPEN = !args.includes("--no-open");
 const portIdx = args.indexOf("--port");
 const PORT = portIdx >= 0 ? Number(args[portIdx + 1]) || 3777 : 3777;
 const TAKEOVER = args.includes("--takeover");
+const DAEMON = args.includes("--daemon");
+const STOP = args.includes("--stop");
+const STATUS = args.includes("--status");
 const WIN = platform() === "win32";
 
 // ---------- snapshot source ----------
@@ -574,6 +588,141 @@ async function tryTakeover() {
   return false;
 }
 
+// ---------- daemon (--daemon / --status / --stop) ----------
+//
+// Detached background process, so the dashboard outlives the shell that started
+// it. Survives closing the terminal; does not survive `wsl --shutdown`, logout
+// or reboot. The pid file is per-port, so a scratch instance on another port
+// never clobbers the real one's bookkeeping.
+
+const STATE_DIR = join(homedir(), ".claude-usage");
+const PID_FILE = join(STATE_DIR, `dashboard-${PORT}.pid`);
+const LOG_FILE = join(STATE_DIR, "dashboard.log");
+
+function readPid() {
+  try {
+    const s = JSON.parse(readFileSync(PID_FILE, "utf8"));
+    return typeof s?.pid === "number" ? s : null;
+  } catch {
+    return null;
+  }
+}
+
+function alive(pid) {
+  try {
+    process.kill(pid, 0); // signal 0 only checks for existence
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Is anything accepting connections on the port? Distinguishes "pid file points
+// at a live server" from "pid file is stale, or the pid got recycled".
+function probe(port) {
+  return new Promise((resolve) => {
+    const sock = connect({ host: "127.0.0.1", port, timeout: 700 });
+    const done = (ok) => { sock.destroy(); resolve(ok); };
+    sock.on("connect", () => done(true));
+    sock.on("error", () => done(false));
+    sock.on("timeout", () => done(false));
+  });
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+function clearOwnPid() {
+  const s = readPid();
+  if (s && s.pid === process.pid) {
+    try { unlinkSync(PID_FILE); } catch {}
+  }
+}
+
+async function running() {
+  const s = readPid();
+  if (s && alive(s.pid) && (await probe(s.port || PORT))) return s;
+  return null;
+}
+
+async function cmdStatus() {
+  const s = await running();
+  if (!s) {
+    console.log(ZH ? `儀表板未在 port ${PORT} 執行。` : `No dashboard running on port ${PORT}.`);
+    process.exit(1);
+  }
+  const mins = Math.round((Date.now() - (s.startedAt || Date.now())) / 60000);
+  console.log(
+    ZH
+      ? `儀表板執行中: ${url} (pid ${s.pid}, 已執行 ${mins} 分鐘)\n記錄檔: ${LOG_FILE}`
+      : `Dashboard running: ${url} (pid ${s.pid}, up ${mins}m)\nLog: ${LOG_FILE}`
+  );
+}
+
+async function cmdStop() {
+  const s = readPid();
+  if (!s || !alive(s.pid)) {
+    try { unlinkSync(PID_FILE); } catch {}
+    console.log(ZH ? `儀表板未在 port ${PORT} 執行。` : `No dashboard running on port ${PORT}.`);
+    return;
+  }
+  try { process.kill(s.pid, "SIGTERM"); } catch {}
+  for (let i = 0; i < 30 && alive(s.pid); i++) await sleep(100);
+  try { unlinkSync(PID_FILE); } catch {}
+  console.log(ZH ? `已停止儀表板 (pid ${s.pid})。` : `Stopped dashboard (pid ${s.pid}).`);
+}
+
+async function cmdDaemon() {
+  const existing = await running();
+  // With --takeover the point is to replace whatever is running, so fall
+  // through and let the child do the takeover dance.
+  if (existing && !TAKEOVER) {
+    console.log(
+      ZH ? `儀表板已在 ${url} 執行中 (pid ${existing.pid})。` : `Dashboard already running at ${url} (pid ${existing.pid}).`
+    );
+    if (OPEN) openBrowser();
+    return;
+  }
+  mkdirSync(STATE_DIR, { recursive: true });
+  const log = openSync(LOG_FILE, "a");
+  // Drop --daemon or the child would fork forever; --no-open because a detached
+  // process has no business opening a browser — the parent does that below.
+  const childArgs = [
+    fileURLToPath(import.meta.url),
+    ...args.filter((a) => a !== "--daemon" && a !== "--no-open"),
+    "--no-open",
+  ];
+  const child = spawn(process.execPath, childArgs, {
+    detached: true,
+    stdio: ["ignore", log, log],
+  });
+  child.unref();
+  // Success = the child owns the port: its pid is in the pid file (written on
+  // "listening") and the port answers. Probing alone isn't enough — under
+  // --takeover the old instance still answers while the child waits its turn.
+  for (let i = 0; i < 80; i++) {
+    const s = readPid();
+    if (s && s.pid === child.pid && (await probe(PORT))) {
+      console.log(
+        `${T.title}: ${url}${LIVE ? "  (--live)" : ""}  ${ZH ? `(背景執行, pid ${child.pid})` : `(daemon, pid ${child.pid})`}`
+      );
+      console.log(
+        ZH
+          ? `停止: node ${basename(fileURLToPath(import.meta.url))} --stop${portIdx >= 0 ? ` --port ${PORT}` : ""}`
+          : `Stop with: node ${basename(fileURLToPath(import.meta.url))} --stop${portIdx >= 0 ? ` --port ${PORT}` : ""}`
+      );
+      if (OPEN) openBrowser();
+      return;
+    }
+    await sleep(100);
+  }
+  console.error(
+    ZH ? `背景啟動失敗，詳見 ${LOG_FILE}` : `Failed to start in the background — see ${LOG_FILE}`
+  );
+  process.exit(1);
+}
+
+// ---------- start ----------
+
 function onServerError(e) {
   if (e.code === "EADDRINUSE") {
     if (TAKEOVER) {
@@ -604,7 +753,25 @@ function onServerError(e) {
 }
 server.on("error", onServerError);
 
-server.listen(PORT, "127.0.0.1", () => {
-  console.log(`${T.title}: ${url}${LIVE ? "  (--live)" : ""}${DEMO ? "  (demo)" : ""}`);
-  if (OPEN) openBrowser();
-});
+function serve() {
+  // The pid file is written on "listening" (not in the listen callback) so the
+  // takeover path — which listens again from inside tryTakeover() — records
+  // its pid too, and --status / --stop work on it.
+  server.on("listening", () => {
+    try {
+      mkdirSync(STATE_DIR, { recursive: true });
+      writeFileSync(PID_FILE, JSON.stringify({ pid: process.pid, port: PORT, startedAt: Date.now() }));
+    } catch {} // bookkeeping only; never keep the dashboard from serving
+  });
+  process.on("exit", clearOwnPid);
+  for (const sig of ["SIGTERM", "SIGINT", "SIGHUP"]) process.on(sig, () => process.exit(0));
+  server.listen(PORT, "127.0.0.1", () => {
+    console.log(`${T.title}: ${url}${LIVE ? "  (--live)" : ""}${DEMO ? "  (demo)" : ""}`);
+    if (OPEN) openBrowser();
+  });
+}
+
+if (STOP) await cmdStop();
+else if (STATUS) await cmdStatus();
+else if (DAEMON) await cmdDaemon();
+else serve();

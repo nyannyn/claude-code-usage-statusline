@@ -90,7 +90,13 @@ line's demo flag:
 node ~/.claude/dashboard.mjs zh demo     # preview, reads nothing
 node ~/.claude/dashboard.mjs zh          # snapshot mode: reads ~/.claude-usage/, no API calls
 node ~/.claude/dashboard.mjs zh --live   # also polls Anthropic's OAuth usage endpoint per profile
+node ~/.claude/dashboard.mjs zh --live --daemon   # detached; survives closing the terminal
+node ~/.claude/dashboard.mjs --stop      # stop the daemon on that port (default 3777)
 ```
+
+Without `--daemon` the dashboard dies with its terminal (`--daemon --takeover`
+replaces a running instance). A daemon still ends on reboot / logout /
+`wsl --shutdown`; there is no auto-start.
 
 Snapshot mode needs the status line to have rendered at least once per account
 (that's what writes `~/.claude-usage/<profile>.json`). `--live` reads each

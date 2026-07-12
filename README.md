@@ -141,9 +141,14 @@ node dashboard.mjs zh --live          # snapshots + live polling
 node dashboard.mjs --port 8080       # custom port
 node dashboard.mjs --no-open         # don't auto-launch the browser
 node dashboard.mjs --takeover        # if the port is taken, ask the running instance to shut down and take over
+node dashboard.mjs --live --daemon   # run detached — survives closing the terminal
+node dashboard.mjs --status          # is a daemon serving this port?
+node dashboard.mjs --stop            # stop it
 ```
 
 **Running it as a background/startup service.** `--takeover` lets you register the dashboard as a startup item without worrying about "port already in use" — the new instance POSTs `/api/shutdown` to whichever instance is already listening, waits for it to exit, and then binds the port itself. On Windows, a simple way to get this running at login: put a shortcut in your Startup folder (`shell:startup`) that runs `wscript.exe` against a tiny `.vbs` wrapper (so no console window flashes) invoking `node dashboard.mjs --takeover --no-open`; each login (or manual re-run after an upgrade) then cleanly replaces the previous instance instead of failing to bind.
+
+**Keeping it alive without a startup item (`--daemon`).** Without `--daemon` the dashboard dies with its terminal. `--daemon` starts it detached and prints the pid; `--status` / `--stop` manage it later, and `--daemon --takeover` replaces whatever instance currently holds the port. A daemon still ends on reboot, logout or `wsl --shutdown` — for start-at-login, use the startup-item recipe above.
 
 | env var | meaning |
 | --- | --- |

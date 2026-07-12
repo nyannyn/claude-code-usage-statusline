@@ -126,9 +126,14 @@ node dashboard.mjs zh --live         # 快照 + 即時查詢
 node dashboard.mjs zh --port 8080    # 自訂 port
 node dashboard.mjs zh --no-open      # 不自動開瀏覽器
 node dashboard.mjs zh --takeover     # port 被占用時,請求該實例關閉(POST /api/shutdown)並接手
+node dashboard.mjs zh --live --daemon  # 背景執行 — 關掉終端機也不會停
+node dashboard.mjs zh --status       # 這個 port 有 daemon 在跑嗎?
+node dashboard.mjs zh --stop         # 停掉它
 ```
 
 **當成背景/開機常駐服務執行。** `--takeover` 讓你把儀表板註冊成開機啟動項目時,不用擔心「port 已被占用」——新實例會對現有實例發送 `/api/shutdown`,等它結束後再自己綁定該 port。在 Windows 上,一種簡單做法是在啟動資料夾(`shell:startup`)放一個捷徑,透過 `wscript.exe` 執行一個極簡的 `.vbs` wrapper(不跳出主控台視窗)呼叫 `node dashboard.mjs --takeover --no-open`;之後每次登入(或升級後手動重跑)都會乾淨地取代前一個實例,不會卡在綁定失敗。
+
+**不設開機啟動、只想脫離終端機(`--daemon`)。** 不加 `--daemon` 時,儀表板會隨終端機一起結束。`--daemon` 以分離程序啟動並印出 pid;之後用 `--status` / `--stop` 管理,`--daemon --takeover` 則會取代目前占用該 port 的實例。daemon 仍會在重開機、登出或 `wsl --shutdown` 時結束——要開機自動啟動,請用上面的啟動項目做法。
 
 | 環境變數 | 意義 |
 | --- | --- |
