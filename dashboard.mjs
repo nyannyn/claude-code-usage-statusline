@@ -155,14 +155,17 @@ const lastGood = new Map();
 async function fetchLiveOne(dir) {
   const key = basename(dir);
   const host = hostOfDir(dir);
+  // errors carry the email too, so mergeByEmail can file them under the right
+  // account card instead of giving a dead token a card of its own
+  const email = liveEmail(dir);
   try {
     const creds = JSON.parse(
       readFileSync(join(dir, ".credentials.json"), "utf8").replace(/^﻿/, "")
     );
     const oauth = creds?.claudeAiOauth;
-    if (!oauth?.accessToken) return { key, host, source: "live", error: "no token" };
+    if (!oauth?.accessToken) return { key, host, email, source: "live", error: "no token" };
     if (oauth.expiresAt && oauth.expiresAt < Date.now())
-      return { key, host, source: "live", error: "token expired (open Claude Code once to refresh)" };
+      return { key, host, email, source: "live", error: "token expired (open Claude Code once to refresh)" };
     const res = await fetch("https://api.anthropic.com/api/oauth/usage", {
       headers: {
         Authorization: `Bearer ${oauth.accessToken}`,
@@ -177,13 +180,13 @@ async function fetchLiveOne(dir) {
       const retryAfter = Number(res.headers.get("retry-after")) || 0;
       return prev
         ? { ...prev, liveError: "rate-limited (429) · showing last known", rateLimited: true, retryAfter }
-        : { key, host, source: "live", error: "endpoint rate-limited (429), retry later", rateLimited: true, retryAfter };
+        : { key, host, email, source: "live", error: "endpoint rate-limited (429), retry later", rateLimited: true, retryAfter };
     }
     if (!res.ok) {
       const prev = lastGood.get(dir);
       return prev
         ? { ...prev, liveError: `HTTP ${res.status} · showing last known` }
-        : { key, host, source: "live", error: `HTTP ${res.status}` };
+        : { key, host, email, source: "live", error: `HTTP ${res.status}` };
     }
     const u = await res.json();
     const win = (w) =>
@@ -201,7 +204,7 @@ async function fetchLiveOne(dir) {
     const entry = {
       key,
       host,
-      email: liveEmail(dir),
+      email,
       configDir: dir,
       plan: oauth.subscriptionType,
       source: "live",
@@ -217,7 +220,7 @@ async function fetchLiveOne(dir) {
   } catch (e) {
     const prev = lastGood.get(dir);
     const msg = String(e.message).slice(0, 80);
-    return prev ? { ...prev, liveError: `${msg} · showing last known` } : { key, host, source: "live", error: msg };
+    return prev ? { ...prev, liveError: `${msg} · showing last known` } : { key, host, email, source: "live", error: msg };
   }
 }
 
@@ -263,15 +266,21 @@ function demoAccounts() {
     ...extra,
   });
   return [
-    // Same email, two machines — the live/fresh Windows copy should become the
-    // merged card, the stale WSL copy (with an expired-token error) should land
-    // in that card's "others" list instead of getting a card of its own.
-    acct(".claude", "work@example.com", 13, 38, { host: "desktop (win32)", source: "live" }),
+    // Same email, two machines — the live/fresh Windows copy becomes the merged
+    // card (titled by its CLAUDE_SL_ACCOUNT label), and the WSL copy's expired
+    // token is NOT shown as an error: one working token proves the account is
+    // fine, so its row collapses to a plain "cached" line under "others".
+    acct(".claude", "work@example.com", 13, 38, { host: "desktop (win32)", source: "live", label: "work" }),
     { key: ".claude", host: "ubuntu (wsl)", email: "work@example.com", source: "live",
       error: "token expired (open Claude Code once to refresh)",
       updatedAt: Date.now() - 2 * 3600 * 1000 },
+    // This account has no working token anywhere (stale snapshot + expired
+    // token), so here the red line does show.
     acct(".claude-c", "play@example.com", 96, 88, { host: "desktop (win32)",
       updatedAt: Date.now() - 26 * 3600 * 1000 }),
+    { key: ".claude-c", host: "ubuntu (wsl)", email: "play@example.com", source: "live",
+      error: "token expired (open Claude Code once to refresh)",
+      updatedAt: Date.now() - 3 * 3600 * 1000 },
   ];
 }
 
@@ -301,11 +310,20 @@ function mergeByEmail(arr) {
     const withLimits = group.filter((e) => e.rate_limits);
     const pickFrom = withLimits.length ? withLimits : group;
     const main = pickFrom.reduce((best, e) => (recency(e) > recency(best) ? e : best));
+    // One working token anywhere proves the account itself is fine — a dead
+    // token on another machine is then routine (it refreshes the next time
+    // that machine is used), not something worth a red line on the card.
+    const liveOk = group.some((e) => e.source === "live" && !e.error && e.rate_limits);
     const others = group
       .filter((e) => e !== main)
-      .map((e) => ({ host: e.host, key: e.key, error: e.liveError || e.error, updatedAt: e.updatedAt }))
+      .map((e) => ({ host: e.host, key: e.key, error: liveOk ? undefined : e.liveError || e.error, updatedAt: e.updatedAt }))
+      .filter((o) => o.error || o.updatedAt) // suppressed error + no data = nothing to say
       .sort((a, b) => recency(b) - recency(a));
-    merged.push(others.length ? { ...main, others } : main);
+    const card = others.length ? { ...main, others } : main;
+    // a display label (CLAUDE_SL_ACCOUNT) may live on a snapshot that lost the
+    // freshness race — carry it over so the card keeps its chosen name
+    const labeled = group.filter((e) => e.label).sort((a, b) => recency(b) - recency(a))[0];
+    merged.push(labeled && labeled !== card ? { ...card, label: labeled.label } : card);
   }
   return merged.sort((a, b) => recency(b) - recency(a));
 }
@@ -444,7 +462,7 @@ function row(a){
   const init = esc(String(a.email||String(a.key||"?").replace(/^\\./,"")).slice(0,2).toUpperCase());
   let h = '<div class="rrow"><div class="acell">'+
     '<div class="avatar" style="background:oklch(58% 0.14 '+hueOf(id)+')">'+init+'</div><div class="ainfo">'+
-    '<div class="aline"><span class="aname">'+esc(a.key)+'</span>'+
+    '<div class="aline"><span class="aname">'+esc(a.label||a.key)+'</span>'+
     (a.plan?'<span class="badge bplan">'+esc(a.plan)+'</span>':'')+
     (a.model?'<span class="badge bmodel">'+esc(a.model)+'</span>':'')+'</div>'+
     (a.email?'<div class="aemail">'+esc(a.email)+'</div>':'')+

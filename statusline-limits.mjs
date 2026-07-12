@@ -87,31 +87,33 @@ function seg(label, win) {
 //      claude in that window); always correct, always wins.
 //   2. .claude.json under CLAUDE_CONFIG_DIR (when each account uses its own config
 //      dir), else ~/.claude.json as a best-effort fallback.
-function account(full) {
-  const override = process.env.CLAUDE_SL_ACCOUNT;
-  if (override) return full ? override : override.split("@")[0];
+function configEmail() {
   try {
     const dir = process.env.CLAUDE_CONFIG_DIR || homedir();
     const j = JSON.parse(
       readFileSync(join(dir, ".claude.json"), "utf8").replace(/^﻿/, "")
     );
-    const email = j?.oauthAccount?.emailAddress;
-    if (!email) return "";
-    return full ? email : email.split("@")[0];
+    return j?.oauthAccount?.emailAddress || "";
   } catch {
     return "";
   }
 }
 
+function account(full) {
+  const v = process.env.CLAUDE_SL_ACCOUNT || configEmail();
+  if (!v) return "";
+  return full ? v : v.split("@")[0];
+}
+
 // Each profile (config dir) drops its latest rate_limits into ~/.claude-usage/
 // so dashboard.mjs can show every account side by side. The key must be stable
-// per profile, so it prefers the config dir name over the (last-login) email.
+// per profile and match what dashboard --live derives from the dir name, so a
+// dedicated config dir always wins; CLAUDE_SL_ACCOUNT keys the shared-dir case
+// (several windows on one dir) and otherwise only labels the card.
 function snapshotKey() {
-  const override = process.env.CLAUDE_SL_ACCOUNT;
-  if (override) return override;
   const dir = process.env.CLAUDE_CONFIG_DIR;
   if (dir) return basename(dir.replace(/[\\/]+$/, ""));
-  return ".claude";
+  return process.env.CLAUDE_SL_ACCOUNT || ".claude";
 }
 
 function writeSnapshot(input) {
@@ -122,9 +124,14 @@ function writeSnapshot(input) {
     mkdirSync(dir, { recursive: true });
     const key = snapshotKey();
     const file = join(dir, key.replace(/[^\w.@-]+/g, "_") + ".json");
+    const override = process.env.CLAUDE_SL_ACCOUNT;
     const snap = {
       key,
-      email: account(true) || undefined,
+      // display name for the dashboard card; the key stays dir-based for merging
+      label: override || undefined,
+      // the account's real identity — a non-email label must not shadow it,
+      // or the dashboard can't group this profile with others per account
+      email: (override?.includes("@") ? override : configEmail()) || undefined,
       configDir: process.env.CLAUDE_CONFIG_DIR || undefined,
       // must match dashboard.mjs hostOfDir(), which labels WSL dirs "<distro> (wsl)"
       host: process.env.WSL_DISTRO_NAME

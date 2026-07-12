@@ -115,11 +115,11 @@ node ~/.claude/dashboard.mjs zh           # 純快照,零 API 呼叫
 node ~/.claude/dashboard.mjs zh --live    # + 向 Anthropic 查沒開視窗的帳號
 ```
 
-**資料來源有兩種,依 profile 合併:**
+**資料來源有兩種,依帳號合併:**
 
-1. **快照(預設,零 API 呼叫)。** 狀態列每次渲染時,順手把該 profile 最新的 `rate_limits` 寫進 `~/.claude-usage/<profile>.json`,儀表板只讀這些檔案。資料新鮮度等於你在該帳號視窗最後一次送訊息的時間;超過 15 分鐘沒更新會標示「資料過舊」。Windows 上還會自動掃描每個 WSL distro 的 `~/.claude-usage`,原生與 WSL 視窗同頁顯示。
+1. **快照(預設,零 API 呼叫)。** 狀態列每次渲染時,順手把該 profile 最新的 `rate_limits` 寫進 `~/.claude-usage/<profile>.json`,儀表板只讀這些檔案。資料新鮮度等於你在該帳號視窗最後一次送訊息的時間;超過 15 分鐘沒更新會標示「資料過舊」。Windows 上還會自動掃描每個 WSL distro 的 `~/.claude-usage`,原生與 WSL 視窗同頁顯示。啟動視窗前設 `CLAUDE_SL_ACCOUNT` 可讓該卡片顯示自訂名稱,不用目錄名。
 
-2. **即時模式(`--live`,自行選用)。** 額外從各 `<config-dir>/.credentials.json` 讀取 OAuth token,直接向 Anthropic 的用量端點查詢——連沒開視窗的帳號也有即時數字。Token 不會離開你的機器(唯一的請求只發往 `api.anthropic.com`),但注意這是未文件化的端點且限流很兇,因此結果會快取 60 秒。Token 過期會顯示在該卡片上;在那個帳號開一次 Claude Code 即可刷新。
+2. **即時模式(`--live`,自行選用)。** 額外從各 `<config-dir>/.credentials.json` 讀取 OAuth token,直接向 Anthropic 的用量端點查詢——連沒開視窗的帳號也有即時數字。Token 不會離開你的機器(唯一的請求只發往 `api.anthropic.com`),但注意這是未文件化的端點且限流很兇,因此結果會快取 60 秒。Token 過期只有在該帳號**所有**副本都沒有可用 token 時才顯示紅字——只要任一台機器的 token 還有效,帳號本身就沒問題,失效的那份會在那台機器下次開 Claude Code 時自動刷新。
 
 ```bash
 node dashboard.mjs zh --live         # 快照 + 即時查詢
