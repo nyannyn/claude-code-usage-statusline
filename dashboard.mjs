@@ -183,9 +183,9 @@ async function fetchLiveOne(dir) {
       readFileSync(join(dir, ".credentials.json"), "utf8").replace(/^﻿/, "")
     );
     const oauth = creds?.claudeAiOauth;
-    if (!oauth?.accessToken) return { key, host, email, source: "live", error: "no token" };
+    if (!oauth?.accessToken) return { key, host, email, configDir: dir, source: "live", error: "no token" };
     if (oauth.expiresAt && oauth.expiresAt < Date.now())
-      return { key, host, email, source: "live", error: "token expired (open Claude Code once to refresh)" };
+      return { key, host, email, configDir: dir, source: "live", error: "token expired (open Claude Code once to refresh)" };
     const res = await fetch("https://api.anthropic.com/api/oauth/usage", {
       headers: {
         Authorization: `Bearer ${oauth.accessToken}`,
@@ -250,11 +250,37 @@ async function fetchLiveOne(dir) {
 const LIVE_TTL = 5 * 60_000;      // normal minimum gap between endpoint sweeps
 const BACKOFF_TTL = 15 * 60_000;  // longer gap once we've been rate-limited
 let liveCache = { at: 0, data: [], nextAllowed: 0 };
+
+// errors that mean "this profile has no usable token right now" (as opposed to
+// endpoint trouble like a 429) — these drive the red-vs-grey reminder styling
+const TOKEN_ERR = /^(no token|token expired)/;
+
+function tokenLooksValid(dir) {
+  try {
+    const oauth = JSON.parse(
+      readFileSync(join(dir, ".credentials.json"), "utf8").replace(/^﻿/, "")
+    )?.claudeAiOauth;
+    return !!oauth?.accessToken && !(oauth.expiresAt && oauth.expiresAt < Date.now());
+  } catch {
+    return false;
+  }
+}
+
 async function fetchLive() {
   const now = Date.now();
   const fresh = now - liveCache.at < LIVE_TTL;
   const backingOff = now < liveCache.nextAllowed;
-  if ((fresh || backingOff) && liveCache.data.length) return liveCache.data;
+  if ((fresh || backingOff) && liveCache.data.length) {
+    // A cached "token expired / no token" verdict goes stale the moment the
+    // user opens Claude Code (or logs in) and the credentials file is
+    // rewritten. Re-reading that file is free, so if any dead-token entry has
+    // come back to life, redo the sweep now instead of keeping the reminder
+    // up for the rest of the cache window.
+    const revived = liveCache.data.some(
+      (d) => d.configDir && TOKEN_ERR.test(d.error || "") && tokenLooksValid(d.configDir)
+    );
+    if (!revived) return liveCache.data;
+  }
   // sequential with a small gap, so we never fire every account simultaneously
   const data = [];
   for (const dir of configDirs()) {
@@ -288,14 +314,14 @@ function demoAccounts() {
   return [
     // Same email, two machines — the live/fresh Windows copy becomes the merged
     // card (titled by its CLAUDE_SL_ACCOUNT label), and the WSL copy's expired
-    // token is NOT shown as an error: one working token proves the account is
-    // fine, so its row collapses to a plain "cached" line under "others".
+    // token shows as a calm grey reminder, not a red line: one working token
+    // proves the account itself is fine.
     acct(".claude", "work@example.com", 13, 38, { host: "desktop (win32)", source: "live", label: "work" }),
     { key: ".claude", host: "ubuntu (wsl)", email: "work@example.com", source: "live",
       error: "token expired (open Claude Code once to refresh)",
       updatedAt: Date.now() - 2 * 3600 * 1000 },
     // This account has no working token anywhere (stale snapshot + expired
-    // token), so here the red line does show.
+    // token), so here the reminder turns red and the whole card dims.
     acct(".claude-c", "play@example.com", 96, 88, { host: "desktop (win32)",
       updatedAt: Date.now() - 26 * 3600 * 1000 }),
     { key: ".claude-c", host: "ubuntu (wsl)", email: "play@example.com", source: "live",
@@ -317,6 +343,18 @@ const recency = (e) => e.tokenExpiresAt || e.updatedAt || 0;
 // every other entry from that email under "others" so its host/error is still
 // visible without spawning a second card. Entries with no email (shouldn't
 // normally happen) never merge — each stays its own card.
+
+// "This entry proves the account works right now": a live probe succeeded, or
+// the statusline rendered recently — a fresh snapshot means Claude Code is
+// open on that account, so an "open Claude Code" reminder would be nonsense
+// even while our cached probe verdict still says expired.
+const FRESH_MS = 15 * 60_000; // matches the client's staleOf() threshold
+const entryOk = (e) =>
+  !!e.rate_limits &&
+  ((e.source === "live" && !e.error) ||
+    (!!e.updatedAt && Date.now() - e.updatedAt < FRESH_MS));
+const deadToken = (e) => TOKEN_ERR.test(e.liveError || e.error || "");
+
 function mergeByEmail(arr) {
   const byEmail = new Map();
   const solo = [];
@@ -325,25 +363,30 @@ function mergeByEmail(arr) {
     if (!byEmail.has(e.email)) byEmail.set(e.email, []);
     byEmail.get(e.email).push(e);
   }
-  const merged = [...solo];
+  const merged = solo.map((e) => ({
+    ...e, tokenOk: entryOk(e), dead: !entryOk(e) && deadToken(e),
+  }));
   for (const group of byEmail.values()) {
     const withLimits = group.filter((e) => e.rate_limits);
     const pickFrom = withLimits.length ? withLimits : group;
     const main = pickFrom.reduce((best, e) => (recency(e) > recency(best) ? e : best));
     // One working token anywhere proves the account itself is fine — a dead
     // token on another machine is then routine (it refreshes the next time
-    // that machine is used), not something worth a red line on the card.
-    const liveOk = group.some((e) => e.source === "live" && !e.error && e.rate_limits);
+    // that machine is used), so the client renders its reminder as plain grey
+    // text. Only when NO token works (dead) does the reminder turn red and
+    // the whole card dim.
+    const tokenOk = group.some(entryOk);
+    const dead = !tokenOk && group.some(deadToken);
     const others = group
       .filter((e) => e !== main)
-      .map((e) => ({ host: e.host, key: e.key, error: liveOk ? undefined : e.liveError || e.error, updatedAt: e.updatedAt }))
-      .filter((o) => o.error || o.updatedAt) // suppressed error + no data = nothing to say
+      .map((e) => ({ host: e.host, key: e.key, error: e.liveError || e.error, updatedAt: e.updatedAt }))
+      .filter((o) => o.error || o.updatedAt) // no error + no data = nothing to say
       .sort((a, b) => recency(b) - recency(a));
-    const card = others.length ? { ...main, others } : main;
+    const card = { ...main, tokenOk, dead, ...(others.length ? { others } : {}) };
     // a display label (CLAUDE_SL_ACCOUNT) may live on a snapshot that lost the
     // freshness race — carry it over so the card keeps its chosen name
     const labeled = group.filter((e) => e.label).sort((a, b) => recency(b) - recency(a))[0];
-    merged.push(labeled && labeled !== card ? { ...card, label: labeled.label } : card);
+    merged.push(labeled && labeled !== main ? { ...card, label: labeled.label } : card);
   }
   return merged.sort((a, b) => recency(b) - recency(a));
 }
@@ -421,6 +464,7 @@ const PAGE = `<!doctype html>
   .gtable { background:var(--panel); border:1px solid var(--line); border-radius:12px; overflow:hidden; }
   .rrow { display:flex; flex-wrap:wrap; align-items:center; gap:16px 24px; padding:16px 20px; border-bottom:1px solid var(--rowline); }
   .rrow:last-child { border-bottom:0; }
+  .rrow.dead { opacity:.55; }
   .acell { min-width:200px; flex:1 1 240px; max-width:320px; display:flex; gap:10px; }
   .avatar { flex:none; width:34px; height:34px; border-radius:50%; display:flex; align-items:center; justify-content:center;
     font-size:12.5px; font-weight:700; color:oklch(98% 0.005 260); letter-spacing:.01em; }
@@ -434,6 +478,7 @@ const PAGE = `<!doctype html>
   .astatus { display:flex; align-items:center; gap:5px; font-size:11.5px; color:var(--t3); }
   .astatus.stale { color:var(--amber); }
   .aerr { display:flex; align-items:center; gap:5px; font-size:11px; color:var(--red); margin-top:4px; }
+  .aerr.soft { color:var(--t5); }
   .aother { display:flex; align-items:center; gap:5px; font-size:11px; color:var(--t5); margin-top:4px; }
   .mcell { flex:1 1 130px; min-width:120px; }
   .mtop { display:flex; justify-content:space-between; align-items:baseline; gap:8px; margin-bottom:6px; }
@@ -488,7 +533,10 @@ function row(a){
   const stale = staleOf(a);
   const id = a.email||a.key||"?";
   const init = esc(String(a.email||String(a.key||"?").replace(/^\\./,"")).slice(0,2).toUpperCase());
-  let h = '<div class="rrow"><div class="acell">'+
+  // tokenOk = some token on this account still works, so a dead token elsewhere
+  // is a routine grey note; dead = no token works anywhere → red + dimmed card.
+  const errCls = a.tokenOk ? 'aerr soft' : 'aerr';
+  let h = '<div class="rrow'+(a.dead?' dead':'')+'"><div class="acell">'+
     '<div class="avatar" style="background:oklch(58% 0.14 '+hueOf(id)+')">'+init+'</div><div class="ainfo">'+
     '<div class="aline"><span class="aname">'+esc(a.label||a.key)+'</span>'+
     (a.plan?'<span class="badge bplan">'+esc(a.plan)+'</span>':'')+
@@ -497,10 +545,10 @@ function row(a){
     '<div class="astatus'+(stale?' stale':'')+'">'+(stale?I.warn:I.clock)+'<span>'+
       (stale?T.cached:T.live)+(a.updatedAt?' · '+T.updated+ago(a.updatedAt)+T.agoTail:'')+
       (a.host?' · '+esc(a.host):'')+'</span></div>'+
-    ((a.liveError||a.error)?'<div class="aerr">'+I.warn+'<span>'+esc(a.liveError||a.error)+'</span></div>':'')+
+    ((a.liveError||a.error)?'<div class="'+errCls+'">'+I.warn+'<span>'+esc(a.liveError||a.error)+'</span></div>':'')+
     (a.others||[]).map(o=>
       o.error
-        ? '<div class="aerr">'+I.warn+'<span>'+esc(o.host)+' · '+esc(o.key)+': '+esc(o.error)+'</span></div>'
+        ? '<div class="'+errCls+'">'+I.warn+'<span>'+esc(o.host)+' · '+esc(o.key)+': '+esc(o.error)+'</span></div>'
         : '<div class="aother">'+I.clock+'<span>'+esc(o.host)+' · '+esc(o.key)+': '+T.cached+
           (o.updatedAt?' · '+ago(o.updatedAt)+T.agoTail:'')+'</span></div>'
     ).join("")+
