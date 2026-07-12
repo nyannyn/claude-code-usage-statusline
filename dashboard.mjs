@@ -144,14 +144,19 @@ function isoToEpoch(iso) {
   return Number.isNaN(t) ? undefined : Math.floor(t / 1000);
 }
 
+// The config dir's .claude.json can lag reality by days (observed: a /login
+// that swapped the flex slot's account refreshed .credentials.json but left
+// oauthAccount six days stale), so alongside the email we return WHEN that
+// file last asserted it — collect() compares it against the snapshot's
+// updatedAt and keeps whichever identity is newer.
 function liveEmail(dir) {
   try {
-    const j = JSON.parse(
-      readFileSync(join(dir, ".claude.json"), "utf8").replace(/^﻿/, "")
-    );
-    return j?.oauthAccount?.emailAddress;
+    const p = join(dir, ".claude.json");
+    const j = JSON.parse(readFileSync(p, "utf8").replace(/^﻿/, ""));
+    const email = j?.oauthAccount?.emailAddress;
+    return email ? { email, emailAt: statSync(p).mtimeMs } : {};
   } catch {
-    return undefined;
+    return {};
   }
 }
 
@@ -177,7 +182,7 @@ async function fetchLiveOne(dir) {
   const host = hostOfDir(dir);
   // errors carry the email too, so mergeByEmail can file them under the right
   // account card instead of giving a dead token a card of its own
-  const email = liveEmail(dir);
+  const { email, emailAt } = liveEmail(dir);
   try {
     const creds = JSON.parse(
       readFileSync(join(dir, ".credentials.json"), "utf8").replace(/^﻿/, "")
@@ -225,6 +230,7 @@ async function fetchLiveOne(dir) {
       key,
       host,
       email,
+      emailAt,
       configDir: dir,
       plan: oauth.subscriptionType,
       source: "live",
@@ -410,7 +416,21 @@ async function collect() {
       const prev = byKey.get(id);
       if (prev) prev.liveError = l.error;
       else byKey.set(id, l);
-    } else byKey.set(id, { ...byKey.get(id), ...l });
+    } else {
+      const prev = byKey.get(id);
+      const next = { ...prev, ...l };
+      // The two identity sources can disagree: the live email comes from the
+      // config dir's .claude.json, which can lag a /login by days, while the
+      // snapshot's email was written by the statusline from inside a running
+      // session on that very profile. Keep whichever was asserted more
+      // recently, so a stale oauthAccount can't re-file a fresh snapshot
+      // (and the live numbers fetched with its token) under the account
+      // that used to own the profile.
+      if (prev?.email && l.email && prev.email !== l.email &&
+          (prev.updatedAt || 0) > (l.emailAt || 0))
+        next.email = prev.email;
+      byKey.set(id, next);
+    }
   }
   // Accounts come and go; snapshots linger. CLAUDE_SL_IGNORE hides a profile by
   // key (".claude-c") or key|host, and CLAUDE_SL_MAX_AGE_DAYS drops snapshot-only
