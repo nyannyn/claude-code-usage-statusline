@@ -158,6 +158,7 @@ node dashboard.mjs --stop            # stop it
 | `CLAUDE_SL_USAGE_DIR` | where the status line writes snapshots (default `~/.claude-usage`) |
 | `CLAUDE_SL_IGNORE` | profile keys to hide, `;`-separated; matches `key` (`.claude-c`) or `key\|host` |
 | `CLAUDE_SL_MAX_AGE_DAYS` | hide snapshot-only cards not updated in N days (default `0` = keep forever; live cards are never aged out) |
+| `CLAUDE_USAGE_DOCS_DIR` | local markdown dir to serve read-only at `/docs` (rendered, linked from the dashboard header). Unset = the route and the link don't exist. Lets you read private runbooks next to the dashboard without their content ever entering this repo |
 
 Profiles are identified by **config dir name + host** underneath, because a Windows `.claude-b` and a WSL `.claude-b` can be different logins — but since quota belongs to the account, not the machine, entries sharing an email are merged into one card, and every other machine's copy is folded into that card's "others" list instead of getting a card of its own. Each card shows the account's email (best effort — `.claude.json` only records the last login), plan, model, usage bars with reset countdowns, and per-model weekly caps in live mode. After you `/login` a *new* account into an existing config dir, that email only refreshes once that account renders the status line at least once, so the dashboard (and status line) may briefly show the previous login's address.
 

@@ -141,6 +141,7 @@ node dashboard.mjs zh --stop         # 停掉它
 | `CLAUDE_CONFIG_DIRS` | `--live` 要用的 config 目錄,以 `;` 分隔(預設:所有含 `.credentials.json` 的 `~/.claude*` 目錄) |
 | `CLAUDE_SL_SNAPSHOT=0` | 停用狀態列寫快照 |
 | `CLAUDE_SL_USAGE_DIR` | 狀態列寫快照的位置(預設 `~/.claude-usage`) |
+| `CLAUDE_USAGE_DOCS_DIR` | 本機 markdown 文件目錄;設定後儀表板以唯讀方式在 `/docs` 渲染並在頁首加入口,沒設定則路由與入口都不存在。私人說明書放本機目錄即可在儀表板旁閱讀,內容完全不進本 repo |
 
 底層 profile 的識別是 **config 目錄名 + 主機**,因為 Windows 的 `.claude-b` 和 WSL 的 `.claude-b` 可能登入不同帳號——但額度屬於帳號而非機器,所以 email 相同的項目會合併成一張卡,其他機器上的同帳號副本只會併入該卡的「其他」清單,不會另外開卡。卡片上的 email 僅供參考(`.claude.json` 只記最後一次登入);即時模式還會顯示各模型的每週上限。
 
