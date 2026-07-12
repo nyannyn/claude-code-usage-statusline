@@ -1,0 +1,4 @@
+# The README's re-embed snippet captures worktree bytes into SCRIPT_B64 /
+# DASHBOARD_B64, so Windows and WSL must check these sources out identically —
+# otherwise each side keeps "fixing" the other's line endings in the blobs.
+*.mjs text eol=lf
