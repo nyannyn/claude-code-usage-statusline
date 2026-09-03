@@ -145,6 +145,40 @@ node dashboard.mjs zh --stop         # 停掉它
 
 底層 profile 的識別是 **config 目錄名 + 主機**,因為 Windows 的 `.claude-b` 和 WSL 的 `.claude-b` 可能登入不同帳號——但額度屬於帳號而非機器,所以 email 相同的項目會合併成一張卡,其他機器上的同帳號副本只會併入該卡的「其他」清單,不會另外開卡。卡片上的 email 僅供參考(`.claude.json` 只記最後一次登入);即時模式還會顯示各模型的每週上限。
 
+### Windows 與 WSL 併在同一頁
+
+不用設定。兩邊各自寫自己的快照,而**跑在 Windows 上**的儀表板會額外讀取每個 WSL distro 的那一份——distro 清單來自 `wsl -l -q`,家目錄則走 `\\wsl$\<distro>\home\<user>`:
+
+```mermaid
+%%{init: {"flowchart": {"wrappingWidth": 420}} }%%
+flowchart TD
+  subgraph WIN["Windows"]
+    WCC["Claude Code · profile .claude-b"]
+    WSNAP["%USERPROFILE%\.claude-usage\.claude-b.json<br/>host: DESKTOP (win32)<br/>email: you@example.com"]
+    WCC -- "statusline writes" --> WSNAP
+  end
+  subgraph WSLD["WSL (any distro)"]
+    LCC["Claude Code · profile .claude-b"]
+    LSNAP["~/.claude-usage/.claude-b.json<br/>host: Ubuntu (wsl)<br/>email: you@example.com"]
+    LCC -- "statusline writes" --> LSNAP
+  end
+  DASH["dashboard.mjs — running on Windows<br/>reads both dirs, merges entries by email"]
+  WSNAP -- "own home dir" --> DASH
+  LSNAP -- "wsl -l -q, then \\wsl$\distro\home\user" --> DASH
+  CARD["ONE card per account, not per machine<br/>you@example.com<br/>5h 87% left · week 62% left<br/>others: Ubuntu (wsl) · updated 12m ago"]
+  DASH --> CARD
+```
+
+由於卡片是依 email 合併,同一個帳號在兩邊都登入時只會有**一張卡**,WSL 那份併進卡片的「其他」列。若你以為是同一個帳號卻長出兩張卡,代表兩邊其實登入了不同帳號。
+
+這個掃描是單向的。想從**跑在 WSL 裡**的儀表板看到同一頁,把 Windows 的快照目錄指給它:
+
+```bash
+CLAUDE_USAGE_DIRS='/mnt/c/Users/<你的帳號>/.claude-usage' node ~/.claude/dashboard.mjs
+```
+
+這只解決快照模式。`--live` 不要比照辦理去設 `CLAUDE_CONFIG_DIRS`:透過 `/mnt/c` 開啟的 Windows config 目錄會被標成 WSL distro 的主機名,和同名的 WSL profile 撞在一起。`--live` 請在 Windows 那邊跑。
+
 ## 運作方式
 
 安裝器會:

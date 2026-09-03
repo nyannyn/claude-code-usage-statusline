@@ -162,6 +162,40 @@ node dashboard.mjs --stop            # stop it
 
 Profiles are identified by **config dir name + host** underneath, because a Windows `.claude-b` and a WSL `.claude-b` can be different logins — but since quota belongs to the account, not the machine, entries sharing an email are merged into one card, and every other machine's copy is folded into that card's "others" list instead of getting a card of its own. Each card shows the account's email (best effort — `.claude.json` only records the last login), plan, model, usage bars with reset countdowns, and per-model weekly caps in live mode. After you `/login` a *new* account into an existing config dir, that email only refreshes once that account renders the status line at least once, so the dashboard (and status line) may briefly show the previous login's address.
 
+### Windows + WSL on one page
+
+Nothing to configure. Both sides write their own snapshots, and a dashboard **running on Windows** additionally reads every WSL distro's copy — the distros come from `wsl -l -q`, their homes from `\\wsl$\<distro>\home\<user>`:
+
+```mermaid
+%%{init: {"flowchart": {"wrappingWidth": 420}} }%%
+flowchart TD
+  subgraph WIN["Windows"]
+    WCC["Claude Code · profile .claude-b"]
+    WSNAP["%USERPROFILE%\.claude-usage\.claude-b.json<br/>host: DESKTOP (win32)<br/>email: you@example.com"]
+    WCC -- "statusline writes" --> WSNAP
+  end
+  subgraph WSLD["WSL (any distro)"]
+    LCC["Claude Code · profile .claude-b"]
+    LSNAP["~/.claude-usage/.claude-b.json<br/>host: Ubuntu (wsl)<br/>email: you@example.com"]
+    LCC -- "statusline writes" --> LSNAP
+  end
+  DASH["dashboard.mjs — running on Windows<br/>reads both dirs, merges entries by email"]
+  WSNAP -- "own home dir" --> DASH
+  LSNAP -- "wsl -l -q, then \\wsl$\distro\home\user" --> DASH
+  CARD["ONE card per account, not per machine<br/>you@example.com<br/>5h 87% left · week 62% left<br/>others: Ubuntu (wsl) · updated 12m ago"]
+  DASH --> CARD
+```
+
+Because cards are merged by email, one account logged in on both sides is **one card**, with the WSL copy folded into its "others" line. Two cards for what you think is one account means the two sides are logged into different accounts.
+
+The scan only goes one way. To get the same page from a dashboard **running inside WSL**, point it at the Windows snapshot dir:
+
+```bash
+CLAUDE_USAGE_DIRS='/mnt/c/Users/<you>/.claude-usage' node ~/.claude/dashboard.mjs
+```
+
+That covers snapshot mode. Don't do the equivalent with `CLAUDE_CONFIG_DIRS` for `--live`: a Windows config dir opened through `/mnt/c` is labelled with the WSL distro's host name, so it collides with the WSL profile of the same dir name. Run `--live` on the Windows side instead.
+
 ## How it works
 
 The installer:
