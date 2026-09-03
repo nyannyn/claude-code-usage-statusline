@@ -12,8 +12,13 @@
 //                 week     weekly quota remaining + reset countdown
 //                 account  account name (the part before @ in your Claude login email)
 //                 email    full account email
+//                 ctx      how full the context window is, in percent
+//                 tokens   tokens this session has burned: output, and new input
+//                          (input + cache creation, excluding cache reads).
+//                          Counts subagent turns; needs the session transcript.
+//                 cost     this session's cost in USD, as Claude Code reports it
 //               Default when omitted: model,effort,5h,week
-//               Use "all" for model,effort,5h,week,account
+//               Use "all" for model,effort,5h,week,account,ctx,tokens,cost
 //
 // Env vars:
 //   CLAUDE_SL_LANG=zh           same as the "zh" argument
@@ -23,22 +28,34 @@
 //                               several windows are logged into different accounts,
 //                               because ~/.claude.json only stores the last login.
 //   CLAUDE_SL_SNAPSHOT=0        disable writing usage snapshots for the dashboard
-//   CLAUDE_SL_USAGE_DIR=<dir>   where snapshots go (default ~/.claude-usage)
+//   CLAUDE_SL_USAGE_DIR=<dir>   where snapshots go (default ~/.claude-usage); the
+//                               "tokens" segment keeps its per-session tally in
+//                               <dir>/sessions/ so it only reads new transcript bytes
 const args = process.argv.slice(2);
 const ZH = args.includes("zh") || process.env.CLAUDE_SL_LANG === "zh";
 const DEMO = args.includes("demo");
 const segArg =
   args.find((a) => a !== "zh" && a !== "demo") || process.env.CLAUDE_SL_SEGMENTS || "";
-const ALL = "model,effort,5h,week,account";
+const ALL = "model,effort,5h,week,account,ctx,tokens,cost";
 const segs = (segArg === "all" ? ALL : segArg || "model,effort,5h,week")
   .split(",")
   .map((s) => s.trim())
   .filter(Boolean);
 const has = (s) => segs.includes(s);
 
-import { readFileSync, writeFileSync, renameSync, mkdirSync } from "node:fs";
+import {
+  readFileSync,
+  writeFileSync,
+  renameSync,
+  mkdirSync,
+  readdirSync,
+  statSync,
+  openSync,
+  readSync,
+  closeSync,
+} from "node:fs";
 import { homedir, hostname, platform } from "node:os";
-import { join, basename } from "node:path";
+import { join, basename, dirname } from "node:path";
 
 const T = ZH
   ? {
@@ -47,6 +64,8 @@ const T = ZH
       none: (label) => `${label} —`,
       seg: (label, r, c) => `${label} 剩 ${r}%${c ? ` (重置 ${c})` : ""}`,
       soon: "即將重置",
+      tokensLabel: "本次",
+      tokens: (o, i) => `本次 out ${o} · in ${i}`,
     }
   : {
       wait: "usage shown after first request",
@@ -54,6 +73,8 @@ const T = ZH
       none: (label) => `${label} —`,
       seg: (label, r, c) => `${label} ${r}% left${c ? ` (resets ${c})` : ""}`,
       soon: "resetting",
+      tokensLabel: "session",
+      tokens: (o, i) => `session out ${o} · in ${i}`,
     };
 
 async function readStdin() {
@@ -116,12 +137,23 @@ function snapshotKey() {
   return process.env.CLAUDE_SL_ACCOUNT || ".claude";
 }
 
+function usageDir() {
+  return process.env.CLAUDE_SL_USAGE_DIR || join(homedir(), ".claude-usage");
+}
+
+// atomic-ish: readers never see a half-written file
+function writeJson(file, data) {
+  mkdirSync(dirname(file), { recursive: true });
+  const tmp = file + "." + process.pid + ".tmp";
+  writeFileSync(tmp, JSON.stringify(data));
+  renameSync(tmp, file);
+}
+
 function writeSnapshot(input) {
   if (DEMO || process.env.CLAUDE_SL_SNAPSHOT === "0") return;
   if (!input?.rate_limits) return; // never clobber good data with an empty session
   try {
-    const dir = process.env.CLAUDE_SL_USAGE_DIR || join(homedir(), ".claude-usage");
-    mkdirSync(dir, { recursive: true });
+    const dir = usageDir();
     const key = snapshotKey();
     const file = join(dir, key.replace(/[^\w.@-]+/g, "_") + ".json");
     const override = process.env.CLAUDE_SL_ACCOUNT;
@@ -143,11 +175,122 @@ function writeSnapshot(input) {
       rate_limits: input.rate_limits,
       updatedAt: Date.now(),
     };
-    const tmp = file + "." + process.pid + ".tmp";
-    writeFileSync(tmp, JSON.stringify(snap));
-    renameSync(tmp, file); // atomic-ish: readers never see a half-written file
+    writeJson(file, snap);
   } catch {
     // snapshots are best-effort; the status line itself must never break
+  }
+}
+
+function fmtNum(n) {
+  if (n >= 1e6) return (n / 1e6).toFixed(1) + "M";
+  if (n >= 1000) return Math.round(n / 1000) + "k";
+  return String(n);
+}
+
+// Tokens burned by this session. Claude Code's stdin only carries context-window
+// snapshots, so the running total has to come from the transcript — which grows to
+// megabytes, hence a per-session cache that remembers how far each file was read.
+//
+// Two transcript quirks drive the counting rules:
+//   - the same message.id is written twice in a row (streaming, then final); the
+//     duplicate carries identical usage, so skipping "same id as the line before"
+//     halves an otherwise ~2x overcount. Duplicates are always adjacent.
+//   - subagent turns live in a sibling <transcript>/subagents/agent-*.jsonl, not in
+//     the main file, and the user wants them counted.
+// "in" deliberately excludes cache_read_input_tokens: re-reading the same cached
+// prompt every turn is not new work, and including it makes the number meaningless.
+function sessionTokens(input) {
+  const path = input?.transcript_path;
+  const sid = input?.session_id;
+  if (!path || !sid) return null;
+  try {
+    const targets = [path];
+    try {
+      const dir = path.replace(/\.jsonl$/, "") + "/subagents";
+      for (const f of readdirSync(dir))
+        if (f.startsWith("agent-") && f.endsWith(".jsonl")) targets.push(join(dir, f));
+    } catch {
+      // no subagents ran in this session
+    }
+
+    const cacheFile = join(usageDir(), "sessions", sid.replace(/[^\w.-]+/g, "_") + ".json");
+    let cache;
+    try {
+      cache = JSON.parse(readFileSync(cacheFile, "utf8"));
+    } catch {
+      // no cache yet, or it was corrupted — recount from scratch
+    }
+    if (cache?.v !== 1 || !cache.files) cache = { v: 1, files: {} };
+
+    let out = 0;
+    let inp = 0;
+    let dirty = false;
+    const kept = {};
+    for (const file of targets) {
+      let e = cache.files[file];
+      if (!e || typeof e.offset !== "number") e = { offset: 0, lastId: null, out: 0, inp: 0 };
+      kept[file] = e;
+      try {
+        const size = statSync(file).size;
+        // shrunk = rotated or truncated; the per-file tally makes the reset a simple
+        // rescan of that one file instead of subtracting from a global total
+        if (size < e.offset) {
+          e.offset = 0;
+          e.lastId = null;
+          e.out = 0;
+          e.inp = 0;
+          dirty = true;
+        }
+        if (size > e.offset) {
+          const fd = openSync(file, "r");
+          try {
+            const buf = Buffer.allocUnsafe(size - e.offset);
+            const n = readSync(fd, buf, 0, buf.length, e.offset);
+            const text = buf.toString("utf8", 0, n);
+            const end = text.lastIndexOf("\n"); // a trailing half-line waits for next time
+            if (end >= 0) {
+              for (const line of text.slice(0, end).split("\n")) {
+                if (!line) continue;
+                let j;
+                try {
+                  j = JSON.parse(line);
+                } catch {
+                  continue;
+                }
+                const u = j?.message?.usage;
+                if (!u) continue;
+                const id = j.message.id ?? null;
+                if (id != null && id === e.lastId) continue;
+                e.lastId = id;
+                e.out += u.output_tokens || 0;
+                e.inp += (u.input_tokens || 0) + (u.cache_creation_input_tokens || 0);
+              }
+              e.offset += Buffer.byteLength(text.slice(0, end + 1));
+              dirty = true;
+            }
+          } finally {
+            closeSync(fd);
+          }
+        }
+      } catch (e) {
+        // a subagent file listed a moment ago can be gone by now — keep what the
+        // others counted; but if the session's own transcript is unreadable the
+        // total is unknown, not zero
+        if (file === path) throw e;
+      }
+      out += e.out;
+      inp += e.inp;
+    }
+    // only the current targets count and get remembered — a transcript this session
+    // no longer reads must not keep contributing to the total
+    if (Object.keys(cache.files).length !== targets.length) dirty = true;
+    cache.files = kept;
+    // last writer wins: two renders of one session racing can leave the older,
+    // smaller tally behind, and the next render reads it back and catches up
+    if (dirty) writeJson(cacheFile, cache);
+    return { out, inp };
+  } catch {
+    return null; // the status line must never break over a bookkeeping detail
   }
 }
 
@@ -164,7 +307,10 @@ const DEMO_DATA = {
       resets_at: Math.floor(Date.now() / 1000) + 4 * 86400 + 6 * 3600,
     },
   },
+  context_window: { used_percentage: 12 },
+  cost: { total_cost_usd: 3.42 },
 };
+const DEMO_TOKENS = { out: 42000, inp: 118000 };
 
 try {
   let input;
@@ -201,6 +347,21 @@ try {
     let a = account(has("email"));
     if (!a && DEMO) a = has("email") ? "you@example.com" : "you";
     if (a) parts.push(a);
+  }
+
+  if (has("ctx")) {
+    const pct = input?.context_window?.used_percentage;
+    parts.push(pct == null ? T.none("context") : `context ${pct}%`);
+  }
+
+  if (has("tokens")) {
+    const t = DEMO ? DEMO_TOKENS : sessionTokens(input);
+    parts.push(t ? T.tokens(fmtNum(t.out), fmtNum(t.inp)) : T.none(T.tokensLabel));
+  }
+
+  if (has("cost")) {
+    const usd = input?.cost?.total_cost_usd;
+    parts.push(typeof usd === "number" ? `$${usd.toFixed(2)}` : T.none("$"));
   }
 
   process.stdout.write(parts.join(" | ") || model);
