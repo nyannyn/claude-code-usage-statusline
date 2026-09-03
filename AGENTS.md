@@ -17,9 +17,12 @@ order shown, left to right:
 | `week`    | weekly quota remaining + reset countdown                    |
 | `account` | account name (the part before `@` in the Claude login email) |
 | `email`   | full account email                                          |
+| `ctx`     | how full the context window is, in percent                  |
+| `tokens`  | tokens this session has burned — output, and new input (input + cache creation; cache reads excluded). Subagent turns included |
+| `cost`    | this session's cost in USD, as Claude Code reports it       |
 
 Default if the user has no preference: `model,effort,5h,week`.
-`all` is shorthand for `model,effort,5h,week,account`.
+`all` is shorthand for `model,effort,5h,week,account,ctx,tokens,cost`.
 
 Notes to relay:
 
@@ -28,6 +31,15 @@ Notes to relay:
 - `account` / `email` are read from `~/.claude.json` (the user's existing Claude
   login) — no extra setup, nothing is sent anywhere.
 - Don't combine `account` and `email`; pick one.
+- `ctx` and `cost` are free — Claude Code already puts both in the status line JSON.
+- `tokens` is the only segment that reads a file: Claude Code sends no running
+  total, so it sums the session transcript and remembers how far it got in
+  `<usage dir>/sessions/<session id>.json` (same dir as the dashboard snapshots,
+  `CLAUDE_SL_USAGE_DIR` moves both). Later renders only read the new bytes.
+- Warn the user before they compare `tokens` with another tool: it counts
+  **output + new input**, leaves out cache reads (re-sending a cached prompt each
+  turn isn't new work), and includes subagent turns. Tools that count cache reads
+  will show a much bigger number for the same session.
 - **Multi-window caveat:** `~/.claude.json` stores only the last login, so if the
   user keeps several windows on different accounts they'll all show the same one.
   Tell them to set `CLAUDE_SL_ACCOUNT` before launching that window (the script

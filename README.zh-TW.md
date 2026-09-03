@@ -54,8 +54,11 @@ Opus 4.8·high | 5h 剩 87% (重置 3h12m) | 週 剩 62% (重置 4d6h)
 | `week`    | 每週額度剩餘 + 重置倒數                                       |
 | `account` | 帳號簡稱(Claude 登入 email 中 `@` 前的部分)                 |
 | `email`   | 完整帳號 email                                               |
+| `ctx`     | context window 用掉幾 %                                      |
+| `tokens`  | 本次 session 燒掉的 token——輸出,以及新輸入(input + cache creation,不含 cache 讀取)。含 subagent 的回合 |
+| `cost`    | 本次 session 花費美金(Claude Code 自己算的數字)              |
 
-預設為 `model,effort,5h,week`;`all` 等於 `model,effort,5h,week,account`。
+預設為 `model,effort,5h,week`;`all` 等於 `model,effort,5h,week,account,ctx,tokens,cost`。
 `account` / `email` 直接讀你既有的 `~/.claude.json`,不會送往任何地方。
 
 > **多視窗使用 `account` / `email` 請注意。** 狀態列 JSON 沒有帳號欄位,而
@@ -64,6 +67,13 @@ Opus 4.8·high | 5h 剩 87% (重置 3h12m) | 週 剩 62% (重置 4d6h)
 > `CLAUDE_SL_ACCOUNT`(例如 `CLAUDE_SL_ACCOUNT=work@acme.com claude`),或讓每個帳號
 > 各用自己的 `CLAUDE_CONFIG_DIR`。腳本的判斷順序:先看 `CLAUDE_SL_ACCOUNT`,再看
 > `CLAUDE_CONFIG_DIR` 下的 `.claude.json`,最後才是 `~/.claude.json`。
+
+> **`tokens` 算的是什麼。** Claude Code 餵給狀態列的只有 context window 的當下快照,
+> 沒有累計值,所以這一段是自己去讀 session 的 transcript 加總,並把「讀到第幾個 byte」
+> 記在 `<usage dir>/sessions/` 底下——之後每次刷新只讀新增的那幾 KB。計入的是
+> **輸出 + 新輸入**(input + cache creation),刻意不算 cache 讀取(每回合重送同一份
+> 快取提示不算新工作);subagent 的回合有算進去。所以這個數字會比「把 cache 讀取
+> 也算進去」的工具小。
 
 **安裝前先預覽。** `demo` 旗標會用假資料渲染一行範例,不需要 Claude Code:
 

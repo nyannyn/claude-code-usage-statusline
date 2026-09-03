@@ -52,10 +52,13 @@ You choose which parts appear, and in what order, by passing a comma-separated l
 | `effort`  | reasoning effort level — appended to the model as `·high`. Higher effort burns quota faster |
 | `5h`      | 5-hour quota remaining + reset countdown                              |
 | `week`    | weekly quota remaining + reset countdown                              |
-| `account` | account name (the part before `@` in your Claude login email)         |
-| `email`   | full account email                                                   |
+| `account` | account name (the part before `@` in your Claude login email) |
+| `email`   | full account email                                          |
+| `ctx`     | how full the context window is, in percent                  |
+| `tokens`  | tokens this session has burned — output, and new input (input + cache creation; cache reads excluded). Subagent turns included |
+| `cost`    | this session's cost in USD, as Claude Code reports it       |
 
-Default is `model,effort,5h,week`. `all` means `model,effort,5h,week,account`.
+Default is `model,effort,5h,week`. `all` means `model,effort,5h,week,account,ctx,tokens,cost`.
 `account` / `email` are read from your existing `~/.claude.json` — nothing is sent anywhere.
 
 > **Heads-up on `account` / `email` with multiple windows.** The status line JSON
@@ -65,6 +68,14 @@ Default is `model,effort,5h,week`. `all` means `model,effort,5h,week,account`.
 > in that window (e.g. `CLAUDE_SL_ACCOUNT=work@acme.com claude`), or give each account
 > its own `CLAUDE_CONFIG_DIR`. The script checks `CLAUDE_SL_ACCOUNT` first, then
 > `.claude.json` under `CLAUDE_CONFIG_DIR`, then `~/.claude.json`.
+
+> **What `tokens` counts.** Claude Code hands the status line only context-window
+> snapshots, never a running total, so this segment adds up the session transcript
+> itself and caches its progress in `<usage dir>/sessions/` — later renders read
+> only the bytes that were appended since. It counts **output + new input**
+> (input + cache creation) and deliberately skips cache reads, because re-sending
+> the same cached prompt every turn isn't new work; subagent turns are included.
+> Expect a smaller number than tools that count cache reads.
 
 **Preview before you install.** The `demo` flag renders a sample line from fake data, no Claude Code needed:
 
