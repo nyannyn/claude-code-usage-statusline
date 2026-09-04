@@ -3,6 +3,10 @@
 # No jq (not installed here) — assertions read JSON with node.
 set -u
 export NO_COLOR=1   # assertions match plain text; A10 re-enables color on purpose
+# The account segment renders whoever is logged in on this machine, which is 6
+# columns wider here than on a CI runner with no account file — pin it, or every
+# width assertion below silently measures a different line.
+export CLAUDE_SL_ACCOUNT=you@example.com
 
 SL="$(cd "$(dirname "$0")/.." && pwd)/statusline-limits.mjs"
 TMP="$(mktemp -d)"
@@ -187,10 +191,10 @@ case "$(row2 60 all zh)" in
 esac
 # no ctx segment = nothing to move down, however narrow the terminal
 check "A8 negative control (no ctx, 20 cols)" "$(rows 20 model,effort,5h,week zh)" "0"
-# CJK labels are two cells wide: at 112 cols the zh line is 108 chars but 114
+# CJK labels are two cells wide: at 106 cols the zh line is 102 chars but 108
 # cells, so a String.length measurement would wrongly keep it on one row
-check "A8 CJK width counted in cells"     "$(rows 112 all zh)" "1"
-check "A8 ...and stays on one row at 117" "$(rows 117 all zh)" "0"
+check "A8 CJK width counted in cells"     "$(rows 106 all zh)" "1"
+check "A8 ...and stays on one row at 112" "$(rows 112 all zh)" "0"
 
 echo "A9  duplicates in real transcripts really are adjacent (skips if none present)"
 REAL=$(ls -S "$HOME"/.claude*/projects/*/*.jsonl 2>/dev/null | head -1)
@@ -239,10 +243,10 @@ case "$(NO_COLOR=1 COLUMNS=999 node "$SL" zh all demo)" in
   *"$esc"*) bad "A10 NO_COLOR=1 still emitted escapes" ;;
   *) ok "A10 NO_COLOR=1 is plain text" ;;
 esac
-# 114 cells of text carrying ~160 characters of escape codes: measuring the raw
+# 108 cells of text carrying ~160 characters of escape codes: measuring the raw
 # string instead of the painted-out one would wrap this at any width
-check "A10 escapes excluded from the width" "$(raw 120 | wc -l | tr -d ' ')" "0"
-check "A10 ...and the real text still wraps at 110" "$(raw 110 | wc -l | tr -d ' ')" "1"
+check "A10 escapes excluded from the width" "$(raw 112 | wc -l | tr -d ' ')" "0"
+check "A10 ...and the real text still wraps at 104" "$(raw 104 | wc -l | tr -d ' ')" "1"
 
 echo
 echo "passed $PASS, failed $FAIL"
