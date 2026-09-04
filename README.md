@@ -5,8 +5,16 @@
 A status line for [Claude Code](https://claude.com/claude-code) that shows the current model, its **reasoning effort level**, and your subscription's **5-hour and weekly usage** with reset countdowns — at a glance, on every prompt.
 
 ```
-Opus 4.8·high | 5h 87% left (resets 3h12m) | week 62% left (resets 4d6h)
+Opus 4.8·high | 5h 87% left (3h12m) | week 62% left (4d6h)
 ```
+
+The real thing, with every segment on (`all`) in a wide window:
+
+![the status line running in Claude Code](docs/statusline-en.png)
+
+Labels are dimmed and the numbers stay bright; the quota and context percentages
+turn green → yellow → red as the room left shrinks. Narrow the window and
+`context` onwards drops to a second row on its own.
 
 The `·high` after the model name is the live reasoning effort (`low` / `medium` / `high` / `xhigh` / `max`) — handy because higher effort burns through your quota faster. It is omitted for models that don't support the effort parameter.
 
@@ -61,6 +69,23 @@ You choose which parts appear, and in what order, by passing a comma-separated l
 Default is `model,effort,5h,week`. `all` means `model,effort,5h,week,account,ctx,tokens,cost`.
 `account` / `email` are read from your existing `~/.claude.json` — nothing is sent anywhere.
 
+**Language.** English by default; pass `zh` for Traditional Chinese. Both the argument
+and `CLAUDE_SL_LANG` are read, and `en` wins over a `zh` that's already baked into
+your `settings.json` — so one window can differ without editing settings or
+restarting anything else: `CLAUDE_SL_LANG=en claude`.
+
+**Two rows when it doesn't fit.** With `ctx` in the list, a line too wide for the
+terminal moves `ctx` and everything after it to a second row; widen the window and
+it goes back to one. Claude Code sets `COLUMNS` before every render, so this
+follows a resize on its own — no configuration.
+
+**Colors carry the urgency.** Labels are dimmed and the numbers stay bright, so the
+line has a focal point instead of eight equally loud fields; the two percentages
+are green / yellow / red by how much room is left (quota remaining, context still
+free). They also run in opposite directions — quota is what's **left**, `ctx` is
+what's **used** — so each says which it is. `NO_COLOR=1` turns color off, and
+escape codes are stripped before the width check, so color never costs a column.
+
 > **Heads-up on `account` / `email` with multiple windows.** The status line JSON
 > contains no account field, and `~/.claude.json` stores only the **last login**, so
 > if you run several windows on different accounts they'll all show that one account.
@@ -81,10 +106,10 @@ Default is `model,effort,5h,week`. `all` means `model,effort,5h,week,account,ctx
 
 ```bash
 node statusline-limits.mjs zh all demo
-# Opus 4.8·high | 5h 剩 87% (重置 3h12m) | 週 剩 62% (重置 4d6h) | your-name
+# Opus 4.8·high | 5h 剩 87% (3h12m) | 週 剩 62% (4d6h) | your-name
 
 node statusline-limits.mjs model,effort,5h,week,email demo
-# Opus 4.8·high | 5h 87% left (resets 3h12m) | week 62% left (resets 4d6h) | you@example.com
+# Opus 4.8·high | 5h 87% left (3h12m) | week 62% left (4d6h) | you@example.com
 ```
 
 Install with your chosen segments by appending them:
@@ -273,6 +298,11 @@ for (const [c, f] of [['SCRIPT_B64', 'statusline-limits.mjs'], ['DASHBOARD_B64',
 fs.writeFileSync('install.mjs', s);
 "
 ```
+
+Forgetting that step is invisible — the repo looks fine, the tests pass, and
+`curl | node` installs the previous version of the script. `node tests/check-embed.mjs`
+decodes both blobs and compares them with the sources; CI runs it on every push and
+pull request together with `bash tests/test-statusline.sh`.
 
 ## Similar projects
 

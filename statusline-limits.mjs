@@ -4,6 +4,7 @@
 //
 // Arguments (any order, space-separated):
 //   zh          Traditional Chinese output (default: English)
+//   en          force English, overriding a "zh" baked into the command
 //   demo        Render a sample line using fake data instead of reading stdin (for previews)
 //   <segments>  Comma-separated list picking which parts to show, in order. Available:
 //                 model    model display name (with ·effort appended when "effort" is on)
@@ -20,8 +21,19 @@
 //               Default when omitted: model,effort,5h,week
 //               Use "all" for model,effort,5h,week,account,ctx,tokens,cost
 //
+// Long lines wrap: when the segments don't fit the terminal width (COLUMNS, which
+// Claude Code sets on every render), "ctx" and everything after it move to a
+// second row. Fits, or no ctx segment? Stays one row.
+//
+// Colors: labels are dimmed and the two percentages are green / yellow / red by
+// how much room is left, so the line has a focal point instead of eight equally
+// loud fields. Set NO_COLOR=1 for plain text. Colors never cost columns — the
+// escape codes are stripped before the width above is measured.
+//
 // Env vars:
-//   CLAUDE_SL_LANG=zh           same as the "zh" argument
+//   CLAUDE_SL_LANG=zh|en        same as the "zh" / "en" argument, so a single
+//                               window can switch language without touching
+//                               settings.json (CLAUDE_SL_LANG=en claude)
 //   CLAUDE_SL_SEGMENTS=...      same as the <segments> argument
 //   CLAUDE_SL_ACCOUNT=you@x.com per-window account label for the account/email
 //                               segment (set before launching claude). Needed when
@@ -32,10 +44,15 @@
 //                               "tokens" segment keeps its per-session tally in
 //                               <dir>/sessions/ so it only reads new transcript bytes
 const args = process.argv.slice(2);
-const ZH = args.includes("zh") || process.env.CLAUDE_SL_LANG === "zh";
+// The language lives in the statusLine command in settings.json, so without an
+// explicit "en" there is no way to override it for one window — you'd have to
+// edit settings and restart. "en" wins over "zh" wherever both appear.
+const EN = args.includes("en") || process.env.CLAUDE_SL_LANG === "en";
+const ZH = !EN && (args.includes("zh") || process.env.CLAUDE_SL_LANG === "zh");
 const DEMO = args.includes("demo");
+const LANG_OR_DEMO = new Set(["zh", "en", "demo"]);
 const segArg =
-  args.find((a) => a !== "zh" && a !== "demo") || process.env.CLAUDE_SL_SEGMENTS || "";
+  args.find((a) => !LANG_OR_DEMO.has(a)) || process.env.CLAUDE_SL_SEGMENTS || "";
 const ALL = "model,effort,5h,week,account,ctx,tokens,cost";
 const segs = (segArg === "all" ? ALL : segArg || "model,effort,5h,week")
   .split(",")
@@ -57,24 +74,44 @@ import {
 import { homedir, hostname, platform } from "node:os";
 import { join, basename, dirname } from "node:path";
 
+// Labels dim, numbers bright, the two percentages colored by how much headroom
+// is left — the one thing on the line that ever needs to be noticed first.
+// NO_COLOR is the de-facto opt-out standard; honor it.
+const COLOR = !process.env.NO_COLOR;
+const paint = (code, s) => (COLOR ? `\u001b[${code}m${s}\u001b[0m` : s);
+const dim = (s) => paint("2", s);
+// headroom: percent still available (quota left, context still free)
+const gauge = (headroom, text) =>
+  paint(headroom < 20 ? "31" : headroom < 50 ? "33" : "32", text);
+
 const T = ZH
   ? {
       wait: "額度資訊待首次請求後顯示",
       week: "週",
-      none: (label) => `${label} —`,
-      seg: (label, r, c) => `${label} 剩 ${r}%${c ? ` (重置 ${c})` : ""}`,
+      none: (label) => `${dim(label)} —`,
+      // no 「重置」 in front of the countdown: the parenthesis after a quota
+      // already reads as one, and those two glyphs cost four columns twice over
+      seg: (label, r, c) =>
+        `${dim(label + " 剩")} ${gauge(+r, r + "%")}${c ? ` ${dim(`(${c})`)}` : ""}`,
       soon: "即將重置",
+      // 「用」 spells out that this percentage runs the opposite way to the
+      // quota ones next to it — the single most misread thing on the line
+      ctx: (p) => `${dim("context 用")} ${gauge(100 - p, p + "%")}`,
       tokensLabel: "本次",
-      tokens: (o, i) => `本次 out ${o} · in ${i}`,
+      tokens: (o, i) => `${dim("本次 out")} ${o} ${dim("· in")} ${i}`,
     }
   : {
       wait: "usage shown after first request",
       week: "week",
-      none: (label) => `${label} —`,
-      seg: (label, r, c) => `${label} ${r}% left${c ? ` (resets ${c})` : ""}`,
+      none: (label) => `${dim(label)} —`,
+      // no "resets" in front of the countdown, same as the zh line: a time in
+      // parentheses after a quota already reads as one, and it costs 14 columns
+      seg: (label, r, c) =>
+        `${dim(label)} ${gauge(+r, r + "%")} ${dim("left")}${c ? ` ${dim(`(${c})`)}` : ""}`,
       soon: "resetting",
+      ctx: (p) => `${dim("context")} ${gauge(100 - p, p + "%")} ${dim("used")}`,
       tokensLabel: "session",
-      tokens: (o, i) => `session out ${o} · in ${i}`,
+      tokens: (o, i) => `${dim("session out")} ${o} ${dim("· in")} ${i}`,
     };
 
 async function readStdin() {
@@ -179,6 +216,14 @@ function writeSnapshot(input) {
   } catch {
     // snapshots are best-effort; the status line itself must never break
   }
+}
+
+// Terminal cells the string occupies. The zh labels are CJK, and those glyphs are
+// two cells wide, so String.length would under-measure the line by a third.
+function cells(s) {
+  s = s.replace(/\u001b\[[0-9;]*m/g, ""); // color is free: it occupies no columns
+  const wide = s.match(/[\u1100-\u115F\u2E80-\u303E\u3041-\u33FF\u3400-\u4DBF\u4E00-\u9FFF\uA000-\uA4CF\uAC00-\uD7A3\uF900-\uFAFF\uFE30-\uFE4F\uFF00-\uFF60\uFFE0-\uFFE6]/g);
+  return s.length + (wide ? wide.length : 0);
 }
 
 function fmtNum(n) {
@@ -328,9 +373,9 @@ try {
   const parts = [];
 
   if (has("model")) {
-    parts.push(has("effort") && effort ? `${model}·${effort}` : model);
+    parts.push(has("effort") && effort ? `${model}${dim("·" + effort)}` : model);
   } else if (has("effort") && effort) {
-    parts.push(effort);
+    parts.push(dim(effort));
   }
 
   const rl = input.rate_limits;
@@ -346,12 +391,16 @@ try {
   if (has("account") || has("email")) {
     let a = account(has("email"));
     if (!a && DEMO) a = has("email") ? "you@example.com" : "you";
-    if (a) parts.push(a);
+    if (a) parts.push(dim(a));
   }
+
+  // where row 2 starts when the line is too wide; -1 = nothing to move down
+  let breakAt = -1;
 
   if (has("ctx")) {
     const pct = input?.context_window?.used_percentage;
-    parts.push(pct == null ? T.none("context") : `context ${pct}%`);
+    breakAt = parts.length;
+    parts.push(pct == null ? T.none("context") : T.ctx(pct));
   }
 
   if (has("tokens")) {
@@ -364,7 +413,20 @@ try {
     parts.push(typeof usd === "number" ? `$${usd.toFixed(2)}` : T.none("$"));
   }
 
-  process.stdout.write(parts.join(" | ") || model);
+  // The script gets no tty (Claude Code captures its output), so COLUMNS is the
+  // only width signal — Claude Code refreshes it before each render, resizes
+  // included. Absent (older Claude Code, piped by hand) = never wrap.
+  // ponytail: one break point, no re-flow; row 2 can still overflow if it alone
+  // is wider than the terminal.
+  const SEP = dim(" | ");
+  const line = parts.join(SEP);
+  const cols = Number(process.env.COLUMNS) || 0;
+  const fits = !cols || cells(line) <= cols - 2; // 2 cells spare for the row's own padding
+  process.stdout.write(
+    (breakAt > 0 && !fits
+      ? parts.slice(0, breakAt).join(SEP) + "\n" + parts.slice(breakAt).join(SEP)
+      : line) || model
+  );
 } catch (e) {
   process.stdout.write(`statusline err: ${String(e.message).slice(0, 40)}`);
 }

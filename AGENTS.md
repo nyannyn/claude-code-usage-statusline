@@ -32,6 +32,16 @@ Notes to relay:
   login) — no extra setup, nothing is sent anywhere.
 - Don't combine `account` and `email`; pick one.
 - `ctx` and `cost` are free — Claude Code already puts both in the status line JSON.
+- Language is the `zh` argument (English without it). `en` — as an argument or as
+  `CLAUDE_SL_LANG=en` — overrides a `zh` already in the user's settings, so tell
+  them `CLAUDE_SL_LANG=en claude` when they want one window in English.
+- The line is colored: labels dimmed, numbers bright, and the quota / `ctx`
+  percentages green→yellow→red as the room left shrinks. `NO_COLOR=1` opts out.
+  Relay that quota percentages are what's **left** while `ctx` is what's **used**
+  (the labels say so: `5h 剩 87%` vs `context 用 12%`).
+- With `ctx` picked, the line splits in two when it's wider than the terminal:
+  `ctx` and everything after it drop to a second row, and re-join when the window
+  is widened (Claude Code refreshes `COLUMNS` on every render).
 - `tokens` is the only segment that reads a file: Claude Code sends no running
   total, so it sums the session transcript and remembers how far it got in
   `<usage dir>/sessions/<session id>.json` (same dir as the dashboard snapshots,
@@ -60,13 +70,13 @@ Examples (these are the actual outputs):
 
 ```
 $ node statusline-limits.mjs zh model,effort,5h,week demo
-Opus 4.8·high | 5h 剩 87% (重置 3h12m) | 週 剩 62% (重置 4d6h)
+Opus 4.8·high | 5h 剩 87% (3h12m) | 週 剩 62% (4d6h)
 
 $ node statusline-limits.mjs zh all demo
-Opus 4.8·high | 5h 剩 87% (重置 3h12m) | 週 剩 62% (重置 4d6h) | <account-name>
+Opus 4.8·high | 5h 剩 87% (3h12m) | 週 剩 62% (4d6h) | <account-name>
 
 $ node statusline-limits.mjs model,effort,5h,week,email demo
-Opus 4.8·high | 5h 87% left (resets 3h12m) | week 62% left (resets 4d6h) | you@example.com
+Opus 4.8·high | 5h 87% left (3h12m) | week 62% left (4d6h) | you@example.com
 ```
 
 For `account` / `email`, `demo` shows the user's real account if `~/.claude.json`

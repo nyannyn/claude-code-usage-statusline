@@ -2,6 +2,11 @@
 # Offline tests for the "tokens" / "ctx" / "cost" segments of statusline-limits.mjs.
 # No jq (not installed here) — assertions read JSON with node.
 set -u
+export NO_COLOR=1   # assertions match plain text; A10 re-enables color on purpose
+# The account segment renders whoever is logged in on this machine, which is 6
+# columns wider here than on a CI runner with no account file — pin it, or every
+# width assertion below silently measures a different line.
+export CLAUDE_SL_ACCOUNT=you@example.com
 
 SL="$(cd "$(dirname "$0")/.." && pwd)/statusline-limits.mjs"
 TMP="$(mktemp -d)"
@@ -156,19 +161,40 @@ a5 "$TMP/does-not-exist.jsonl" "session —"
 a5 "$TMP/junk.jsonl" "session out 0 · in 0"
 
 echo "A6  demo renders all three new segments"
-for LANG_ARG in "" "zh"; do
-  OUT=$(node "$SL" $LANG_ARG all demo)
+a6() {
+  OUT=$(node "$SL" $1 all demo)
   case "$OUT" in
-    *"context 12%"*"out 42k · in 118k"*"\$3.42"*) ok "A6 ${LANG_ARG:-en}: $OUT" ;;
-    *) bad "A6 ${LANG_ARG:-en} got: $OUT" ;;
+    *"$2"*"out 42k · in 118k"*"\$3.42"*) ok "A6 ${1:-en}: $OUT" ;;
+    *) bad "A6 ${1:-en} wanted '$2', got: $OUT" ;;
   esac
-done
+}
+# the percentage that runs the other way says so, in both languages
+a6 ""   "context 12% used"
+a6 "zh" "context 用 12%"
 
-echo "A7  default segments are byte-for-byte unchanged"
-OLD=$(git -C "$(dirname "$SL")" show main:statusline-limits.mjs 2>/dev/null > "$TMP/old.mjs" && node "$TMP/old.mjs" zh model,effort,5h,week demo)
-NEW=$(node "$SL" zh model,effort,5h,week demo)
-if [ -z "$OLD" ]; then bad "A7 could not read main:statusline-limits.mjs"
-else check "A7 default output" "$NEW" "$OLD"; fi
+echo "A7  the default line renders exactly as documented"
+# Frozen strings, not a diff against main: once this file is on main, comparing
+# with main compares new against new and can never fail again.
+check "A7 zh default" "$(node "$SL" zh model,effort,5h,week demo)" \
+  "Opus 4.8·high | 5h 剩 87% (3h12m) | 週 剩 62% (4d6h)"
+check "A7 en default" "$(node "$SL" model,effort,5h,week demo)" \
+  "Opus 4.8·high | 5h 87% left (3h12m) | week 62% left (4d6h)"
+
+echo "A8  the line wraps to two rows only when it doesn't fit COLUMNS"
+rows() { COLUMNS="$1" node "$SL" ${3:-} $2 demo | wc -l | tr -d ' '; }   # wc -l counts the \n
+row2() { COLUMNS="$1" node "$SL" ${3:-} $2 demo | sed -n '2p'; }
+check "A8 wide terminal, one row"        "$(rows 200 all zh)" "0"
+check "A8 narrow terminal, two rows"     "$(rows 60 all zh)"  "1"
+case "$(row2 60 all zh)" in
+  context*) ok "A8 row 2 starts at context: $(row2 60 all zh)" ;;
+  *) bad "A8 row 2 got: $(row2 60 all zh)" ;;
+esac
+# no ctx segment = nothing to move down, however narrow the terminal
+check "A8 negative control (no ctx, 20 cols)" "$(rows 20 model,effort,5h,week zh)" "0"
+# CJK labels are two cells wide: at 106 cols the zh line is 102 chars but 108
+# cells, so a String.length measurement would wrongly keep it on one row
+check "A8 CJK width counted in cells"     "$(rows 106 all zh)" "1"
+check "A8 ...and stays on one row at 112" "$(rows 112 all zh)" "0"
 
 echo "A9  duplicates in real transcripts really are adjacent (skips if none present)"
 REAL=$(ls -S "$HOME"/.claude*/projects/*/*.jsonl 2>/dev/null | head -1)
@@ -195,6 +221,44 @@ else
   ' "$TMP/adj.json" | grep -q '^ok' && ok "A9 $(cat "$TMP/adj.json") in $(basename "$REAL")" \
     || bad "A9 non-adjacent duplicate found: $(cat "$TMP/adj.json") — switch the product to a Set"
 fi
+
+echo "A10 color paints the gauges but never costs a column"
+raw() { NO_COLOR="" COLUMNS="$1" node "$SL" zh all demo; }
+esc=$(printf '\033')
+case "$(raw 999)" in
+  *"$esc[32m87%$esc[0m"*) ok "A10 quota at 87% left is green" ;;
+  *) bad "A10 no green 87% in colored output" ;;
+esac
+LOW=$(NO_COLOR="" COLUMNS=999 node -e '
+  const { spawnSync } = require("node:child_process");
+  // 4% of the 5h quota left: the gauge must go red, the other one stays green
+  const d = { model:{display_name:"M"}, rate_limits:{ five_hour:{used_percentage:96}, seven_day:{used_percentage:38} } };
+  process.stdout.write(spawnSync(process.execPath, [process.argv[1], "zh", "5h,week"], { input: JSON.stringify(d), encoding: "utf8", env: { ...process.env, CLAUDE_SL_SNAPSHOT: "0" } }).stdout);
+' "$SL")
+case "$LOW" in
+  *"$esc[31m4%$esc[0m"*"$esc[32m62%$esc[0m"*) ok "A10 4% left is red while 62% stays green" ;;
+  *) bad "A10 gauge colors: $(printf '%s' "$LOW" | cat -v)" ;;
+esac
+case "$(NO_COLOR=1 COLUMNS=999 node "$SL" zh all demo)" in
+  *"$esc"*) bad "A10 NO_COLOR=1 still emitted escapes" ;;
+  *) ok "A10 NO_COLOR=1 is plain text" ;;
+esac
+# 108 cells of text carrying ~160 characters of escape codes: measuring the raw
+# string instead of the painted-out one would wrap this at any width
+check "A10 escapes excluded from the width" "$(raw 112 | wc -l | tr -d ' ')" "0"
+check "A10 ...and the real text still wraps at 104" "$(raw 104 | wc -l | tr -d ' ')" "1"
+
+echo "A11 \"en\" overrides a zh baked into the settings command"
+seg1() { node "$SL" $1 all demo; }
+case "$(seg1 "zh en")" in *"87% left"*) ok "A11 en argument wins over zh" ;; *) bad "A11 en argument: $(seg1 "zh en")" ;; esac
+case "$(CLAUDE_SL_LANG=en node "$SL" zh all demo)" in
+  *"87% left"*) ok "A11 CLAUDE_SL_LANG=en wins over the zh argument" ;;
+  *) bad "A11 CLAUDE_SL_LANG=en: $(CLAUDE_SL_LANG=en node "$SL" zh all demo)" ;;
+esac
+# negative control: without the override the same command is still Chinese
+case "$(seg1 zh)" in *"剩 87%"*) ok "A11 negative control (zh alone stays Chinese)" ;; *) bad "A11 zh alone: $(seg1 zh)" ;; esac
+# "en" must not be mistaken for the segment list, which sits in the same argv slot
+check "A11 segments still parse next to en" "$(node "$SL" en 5h demo)" "5h 87% left (3h12m)"
 
 echo
 echo "passed $PASS, failed $FAIL"

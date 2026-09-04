@@ -5,8 +5,15 @@
 一個 [Claude Code](https://claude.com/claude-code) 狀態列,在每次輸入時一眼看見目前模型、它的**思考層級**,以及訂閱方案的 **5 小時與每週額度**及重置倒數。
 
 ```
-Opus 4.8·high | 5h 剩 87% (重置 3h12m) | 週 剩 62% (重置 4d6h)
+Opus 4.8·high | 5h 剩 87% (3h12m) | 週 剩 62% (4d6h)
 ```
+
+實際畫面(`zh all`,寬視窗):
+
+![狀態列實際畫面](docs/statusline-zh-tw.png)
+
+標籤是暗字、數字亮白,額度與 context 的百分比依剩餘空間上綠/黃/紅;視窗不夠寬時
+`context` 以後會自動移到第二行。
 
 模型名後面的 `·high` 是目前的思考層級(`low` / `medium` / `high` / `xhigh` / `max`)——層級愈高愈耗額度,所以放在這裡很實用。模型不支援思考參數時會自動省略。
 
@@ -61,6 +68,20 @@ Opus 4.8·high | 5h 剩 87% (重置 3h12m) | 週 剩 62% (重置 4d6h)
 預設為 `model,effort,5h,week`;`all` 等於 `model,effort,5h,week,account,ctx,tokens,cost`。
 `account` / `email` 直接讀你既有的 `~/.claude.json`,不會送往任何地方。
 
+**語言。** 預設英文,加 `zh` 就是繁體中文。參數與 `CLAUDE_SL_LANG` 都吃,而且 `en`
+會蓋過已經寫死在 `settings.json` 裡的 `zh`——所以單一視窗可以不一樣,不必改設定
+也不必重開其他視窗:`CLAUDE_SL_LANG=en claude`。
+
+**放不下就換兩行。** 清單裡有 `ctx` 時,一行塞不進終端機寬度就會把 `ctx` 以後的段落
+移到第二行;視窗拉寬又會變回一行。Claude Code 每次渲染前都會設好 `COLUMNS`,所以
+拉伸視窗會自動跟著變,不用設定。
+
+**顏色負責分層。** 標籤是暗字、數字保持亮白,整行才有落點,不會八個欄位一樣大聲;
+兩個百分比依「還剩多少空間」上綠/黃/紅(額度看剩餘,`ctx` 看還沒用掉的部分)。
+這兩個百分比方向相反——額度是**剩下**幾 %,`ctx` 是**用掉**幾 %——所以各自把
+「剩」「用」寫在標籤裡。`NO_COLOR=1` 可全部關掉;寬度計算前會先剝掉跳脫碼,
+所以顏色不佔任何一欄。
+
 > **多視窗使用 `account` / `email` 請注意。** 狀態列 JSON 沒有帳號欄位,而
 > `~/.claude.json` 只存**最後一次登入**的帳號,所以同時開多個登入不同帳號的視窗時,
 > 它們會全部顯示同一個帳號。要讓各視窗顯示正確帳號,啟動該視窗的 Claude Code 前先設
@@ -79,10 +100,10 @@ Opus 4.8·high | 5h 剩 87% (重置 3h12m) | 週 剩 62% (重置 4d6h)
 
 ```bash
 node statusline-limits.mjs zh all demo
-# Opus 4.8·high | 5h 剩 87% (重置 3h12m) | 週 剩 62% (重置 4d6h) | 你的帳號名
+# Opus 4.8·high | 5h 剩 87% (3h12m) | 週 剩 62% (4d6h) | 你的帳號名
 
 node statusline-limits.mjs zh model,effort,5h,week,email demo
-# Opus 4.8·high | 5h 剩 87% (重置 3h12m) | 週 剩 62% (重置 4d6h) | you@example.com
+# Opus 4.8·high | 5h 剩 87% (3h12m) | 週 剩 62% (4d6h) | you@example.com
 ```
 
 把選好的區段接在安裝指令後面即可:
@@ -255,6 +276,10 @@ for (const [c, f] of [['SCRIPT_B64', 'statusline-limits.mjs'], ['DASHBOARD_B64',
 fs.writeFileSync('install.mjs', s);
 "
 ```
+
+漏做這一步是看不出來的——repo 一切正常、測試全過，但 `curl | node` 裝到的是舊版腳本。
+`node tests/check-embed.mjs` 會把兩個 blob 解碼回來跟原始檔比對;CI 在每次 push 與
+pull request 都會跑它,連同 `bash tests/test-statusline.sh`。
 
 ## 類似專案
 
