@@ -8,6 +8,14 @@ A status line for [Claude Code](https://claude.com/claude-code) that shows the c
 Opus 4.8·high | 5h 87% left (3h12m) | week 62% left (4d6h)
 ```
 
+The real thing, with every segment on (`all`) in a wide window:
+
+![the status line running in Claude Code](docs/statusline-en.png)
+
+Labels are dimmed and the numbers stay bright; the quota and context percentages
+turn green → yellow → red as the room left shrinks. Narrow the window and
+`context` onwards drops to a second row on its own.
+
 The `·high` after the model name is the live reasoning effort (`low` / `medium` / `high` / `xhigh` / `max`) — handy because higher effort burns through your quota faster. It is omitted for models that don't support the effort parameter.
 
 Usage data is read straight from the JSON that Claude Code passes to the status line (`rate_limits` and `effort`). **No API calls, no tokens, no keys.**
