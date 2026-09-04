@@ -66,6 +66,13 @@ terminal moves `ctx` and everything after it to a second row; widen the window a
 it goes back to one. Claude Code sets `COLUMNS` before every render, so this
 follows a resize on its own — no configuration.
 
+**Colors carry the urgency.** Labels are dimmed and the numbers stay bright, so the
+line has a focal point instead of eight equally loud fields; the two percentages
+are green / yellow / red by how much room is left (quota remaining, context still
+free). They also run in opposite directions — quota is what's **left**, `ctx` is
+what's **used** — so each says which it is. `NO_COLOR=1` turns color off, and
+escape codes are stripped before the width check, so color never costs a column.
+
 > **Heads-up on `account` / `email` with multiple windows.** The status line JSON
 > contains no account field, and `~/.claude.json` stores only the **last login**, so
 > if you run several windows on different accounts they'll all show that one account.
@@ -86,7 +93,7 @@ follows a resize on its own — no configuration.
 
 ```bash
 node statusline-limits.mjs zh all demo
-# Opus 4.8·high | 5h 剩 87% (重置 3h12m) | 週 剩 62% (重置 4d6h) | your-name
+# Opus 4.8·high | 5h 剩 87% (3h12m) | 週 剩 62% (4d6h) | your-name
 
 node statusline-limits.mjs model,effort,5h,week,email demo
 # Opus 4.8·high | 5h 87% left (resets 3h12m) | week 62% left (resets 4d6h) | you@example.com
