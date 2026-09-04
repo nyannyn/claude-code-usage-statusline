@@ -61,6 +61,10 @@ Opus 4.8·high | 5h 剩 87% (重置 3h12m) | 週 剩 62% (重置 4d6h)
 預設為 `model,effort,5h,week`;`all` 等於 `model,effort,5h,week,account,ctx,tokens,cost`。
 `account` / `email` 直接讀你既有的 `~/.claude.json`,不會送往任何地方。
 
+**放不下就換兩行。** 清單裡有 `ctx` 時,一行塞不進終端機寬度就會把 `ctx` 以後的段落
+移到第二行;視窗拉寬又會變回一行。Claude Code 每次渲染前都會設好 `COLUMNS`,所以
+拉伸視窗會自動跟著變,不用設定。
+
 > **多視窗使用 `account` / `email` 請注意。** 狀態列 JSON 沒有帳號欄位,而
 > `~/.claude.json` 只存**最後一次登入**的帳號,所以同時開多個登入不同帳號的視窗時,
 > 它們會全部顯示同一個帳號。要讓各視窗顯示正確帳號,啟動該視窗的 Claude Code 前先設

@@ -170,6 +170,22 @@ NEW=$(node "$SL" zh model,effort,5h,week demo)
 if [ -z "$OLD" ]; then bad "A7 could not read main:statusline-limits.mjs"
 else check "A7 default output" "$NEW" "$OLD"; fi
 
+echo "A8  the line wraps to two rows only when it doesn't fit COLUMNS"
+rows() { COLUMNS="$1" node "$SL" ${3:-} $2 demo | wc -l | tr -d ' '; }   # wc -l counts the \n
+row2() { COLUMNS="$1" node "$SL" ${3:-} $2 demo | sed -n '2p'; }
+check "A8 wide terminal, one row"        "$(rows 200 all zh)" "0"
+check "A8 narrow terminal, two rows"     "$(rows 60 all zh)"  "1"
+case "$(row2 60 all zh)" in
+  context*) ok "A8 row 2 starts at context: $(row2 60 all zh)" ;;
+  *) bad "A8 row 2 got: $(row2 60 all zh)" ;;
+esac
+# no ctx segment = nothing to move down, however narrow the terminal
+check "A8 negative control (no ctx, 20 cols)" "$(rows 20 model,effort,5h,week zh)" "0"
+# CJK labels are two cells wide: at 118 cols the zh line is 112 chars but 121
+# cells, so a String.length measurement would wrongly keep it on one row
+check "A8 CJK width counted in cells"    "$(rows 118 all zh)" "1"
+check "A8 ...and stays on one row at 124" "$(rows 124 all zh)" "0"
+
 echo "A9  duplicates in real transcripts really are adjacent (skips if none present)"
 REAL=$(ls -S "$HOME"/.claude*/projects/*/*.jsonl 2>/dev/null | head -1)
 if [ -z "$REAL" ]; then echo "  SKIP  no local transcripts"

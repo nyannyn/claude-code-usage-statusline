@@ -32,6 +32,9 @@ Notes to relay:
   login) — no extra setup, nothing is sent anywhere.
 - Don't combine `account` and `email`; pick one.
 - `ctx` and `cost` are free — Claude Code already puts both in the status line JSON.
+- With `ctx` picked, the line splits in two when it's wider than the terminal:
+  `ctx` and everything after it drop to a second row, and re-join when the window
+  is widened (Claude Code refreshes `COLUMNS` on every render).
 - `tokens` is the only segment that reads a file: Claude Code sends no running
   total, so it sums the session transcript and remembers how far it got in
   `<usage dir>/sessions/<session id>.json` (same dir as the dashboard snapshots,

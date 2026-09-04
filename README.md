@@ -61,6 +61,11 @@ You choose which parts appear, and in what order, by passing a comma-separated l
 Default is `model,effort,5h,week`. `all` means `model,effort,5h,week,account,ctx,tokens,cost`.
 `account` / `email` are read from your existing `~/.claude.json` — nothing is sent anywhere.
 
+**Two rows when it doesn't fit.** With `ctx` in the list, a line too wide for the
+terminal moves `ctx` and everything after it to a second row; widen the window and
+it goes back to one. Claude Code sets `COLUMNS` before every render, so this
+follows a resize on its own — no configuration.
+
 > **Heads-up on `account` / `email` with multiple windows.** The status line JSON
 > contains no account field, and `~/.claude.json` stores only the **last login**, so
 > if you run several windows on different accounts they'll all show that one account.

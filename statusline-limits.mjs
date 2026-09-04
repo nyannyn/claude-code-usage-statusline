@@ -20,6 +20,10 @@
 //               Default when omitted: model,effort,5h,week
 //               Use "all" for model,effort,5h,week,account,ctx,tokens,cost
 //
+// Long lines wrap: when the segments don't fit the terminal width (COLUMNS, which
+// Claude Code sets on every render), "ctx" and everything after it move to a
+// second row. Fits, or no ctx segment? Stays one row.
+//
 // Env vars:
 //   CLAUDE_SL_LANG=zh           same as the "zh" argument
 //   CLAUDE_SL_SEGMENTS=...      same as the <segments> argument
@@ -179,6 +183,13 @@ function writeSnapshot(input) {
   } catch {
     // snapshots are best-effort; the status line itself must never break
   }
+}
+
+// Terminal cells the string occupies. The zh labels are CJK, and those glyphs are
+// two cells wide, so String.length would under-measure the line by a third.
+function cells(s) {
+  const wide = s.match(/[\u1100-\u115F\u2E80-\u303E\u3041-\u33FF\u3400-\u4DBF\u4E00-\u9FFF\uA000-\uA4CF\uAC00-\uD7A3\uF900-\uFAFF\uFE30-\uFE4F\uFF00-\uFF60\uFFE0-\uFFE6]/g);
+  return s.length + (wide ? wide.length : 0);
 }
 
 function fmtNum(n) {
@@ -349,8 +360,12 @@ try {
     if (a) parts.push(a);
   }
 
+  // where row 2 starts when the line is too wide; -1 = nothing to move down
+  let breakAt = -1;
+
   if (has("ctx")) {
     const pct = input?.context_window?.used_percentage;
+    breakAt = parts.length;
     parts.push(pct == null ? T.none("context") : `context ${pct}%`);
   }
 
@@ -364,7 +379,19 @@ try {
     parts.push(typeof usd === "number" ? `$${usd.toFixed(2)}` : T.none("$"));
   }
 
-  process.stdout.write(parts.join(" | ") || model);
+  // The script gets no tty (Claude Code captures its output), so COLUMNS is the
+  // only width signal — Claude Code refreshes it before each render, resizes
+  // included. Absent (older Claude Code, piped by hand) = never wrap.
+  // ponytail: one break point, no re-flow; row 2 can still overflow if it alone
+  // is wider than the terminal.
+  const line = parts.join(" | ");
+  const cols = Number(process.env.COLUMNS) || 0;
+  const fits = !cols || cells(line) <= cols - 2; // 2 cells spare for the row's own padding
+  process.stdout.write(
+    (breakAt > 0 && !fits
+      ? parts.slice(0, breakAt).join(" | ") + "\n" + parts.slice(breakAt).join(" | ")
+      : line) || model
+  );
 } catch (e) {
   process.stdout.write(`statusline err: ${String(e.message).slice(0, 40)}`);
 }
