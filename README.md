@@ -61,6 +61,11 @@ You choose which parts appear, and in what order, by passing a comma-separated l
 Default is `model,effort,5h,week`. `all` means `model,effort,5h,week,account,ctx,tokens,cost`.
 `account` / `email` are read from your existing `~/.claude.json` — nothing is sent anywhere.
 
+**Language.** English by default; pass `zh` for Traditional Chinese. Both the argument
+and `CLAUDE_SL_LANG` are read, and `en` wins over a `zh` that's already baked into
+your `settings.json` — so one window can differ without editing settings or
+restarting anything else: `CLAUDE_SL_LANG=en claude`.
+
 **Two rows when it doesn't fit.** With `ctx` in the list, a line too wide for the
 terminal moves `ctx` and everything after it to a second row; widen the window and
 it goes back to one. Claude Code sets `COLUMNS` before every render, so this

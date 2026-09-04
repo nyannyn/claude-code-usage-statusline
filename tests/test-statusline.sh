@@ -248,6 +248,18 @@ esac
 check "A10 escapes excluded from the width" "$(raw 112 | wc -l | tr -d ' ')" "0"
 check "A10 ...and the real text still wraps at 104" "$(raw 104 | wc -l | tr -d ' ')" "1"
 
+echo "A11 \"en\" overrides a zh baked into the settings command"
+seg1() { node "$SL" $1 all demo; }
+case "$(seg1 "zh en")" in *"87% left"*) ok "A11 en argument wins over zh" ;; *) bad "A11 en argument: $(seg1 "zh en")" ;; esac
+case "$(CLAUDE_SL_LANG=en node "$SL" zh all demo)" in
+  *"87% left"*) ok "A11 CLAUDE_SL_LANG=en wins over the zh argument" ;;
+  *) bad "A11 CLAUDE_SL_LANG=en: $(CLAUDE_SL_LANG=en node "$SL" zh all demo)" ;;
+esac
+# negative control: without the override the same command is still Chinese
+case "$(seg1 zh)" in *"剩 87%"*) ok "A11 negative control (zh alone stays Chinese)" ;; *) bad "A11 zh alone: $(seg1 zh)" ;; esac
+# "en" must not be mistaken for the segment list, which sits in the same argv slot
+check "A11 segments still parse next to en" "$(node "$SL" en 5h demo)" "5h 87% left (3h12m)"
+
 echo
 echo "passed $PASS, failed $FAIL"
 [ "$FAIL" -eq 0 ]

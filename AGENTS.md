@@ -32,6 +32,9 @@ Notes to relay:
   login) — no extra setup, nothing is sent anywhere.
 - Don't combine `account` and `email`; pick one.
 - `ctx` and `cost` are free — Claude Code already puts both in the status line JSON.
+- Language is the `zh` argument (English without it). `en` — as an argument or as
+  `CLAUDE_SL_LANG=en` — overrides a `zh` already in the user's settings, so tell
+  them `CLAUDE_SL_LANG=en claude` when they want one window in English.
 - The line is colored: labels dimmed, numbers bright, and the quota / `ctx`
   percentages green→yellow→red as the room left shrinks. `NO_COLOR=1` opts out.
   Relay that quota percentages are what's **left** while `ctx` is what's **used**

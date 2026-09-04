@@ -8,6 +8,13 @@
 Opus 4.8·high | 5h 剩 87% (3h12m) | 週 剩 62% (4d6h)
 ```
 
+實際畫面(`zh all`,寬視窗):
+
+![狀態列實際畫面](docs/statusline-zh-tw.png)
+
+標籤是暗字、數字亮白,額度與 context 的百分比依剩餘空間上綠/黃/紅;視窗不夠寬時
+`context` 以後會自動移到第二行。
+
 模型名後面的 `·high` 是目前的思考層級(`low` / `medium` / `high` / `xhigh` / `max`)——層級愈高愈耗額度,所以放在這裡很實用。模型不支援思考參數時會自動省略。
 
 資料直接讀取 Claude Code 餵給狀態列的 JSON(`rate_limits` 與 `effort`)。**不呼叫 API、不需金鑰。**
@@ -60,6 +67,10 @@ Opus 4.8·high | 5h 剩 87% (3h12m) | 週 剩 62% (4d6h)
 
 預設為 `model,effort,5h,week`;`all` 等於 `model,effort,5h,week,account,ctx,tokens,cost`。
 `account` / `email` 直接讀你既有的 `~/.claude.json`,不會送往任何地方。
+
+**語言。** 預設英文,加 `zh` 就是繁體中文。參數與 `CLAUDE_SL_LANG` 都吃,而且 `en`
+會蓋過已經寫死在 `settings.json` 裡的 `zh`——所以單一視窗可以不一樣,不必改設定
+也不必重開其他視窗:`CLAUDE_SL_LANG=en claude`。
 
 **放不下就換兩行。** 清單裡有 `ctx` 時,一行塞不進終端機寬度就會把 `ctx` 以後的段落
 移到第二行;視窗拉寬又會變回一行。Claude Code 每次渲染前都會設好 `COLUMNS`,所以

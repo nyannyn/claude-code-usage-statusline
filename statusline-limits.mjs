@@ -4,6 +4,7 @@
 //
 // Arguments (any order, space-separated):
 //   zh          Traditional Chinese output (default: English)
+//   en          force English, overriding a "zh" baked into the command
 //   demo        Render a sample line using fake data instead of reading stdin (for previews)
 //   <segments>  Comma-separated list picking which parts to show, in order. Available:
 //                 model    model display name (with ·effort appended when "effort" is on)
@@ -30,7 +31,9 @@
 // escape codes are stripped before the width above is measured.
 //
 // Env vars:
-//   CLAUDE_SL_LANG=zh           same as the "zh" argument
+//   CLAUDE_SL_LANG=zh|en        same as the "zh" / "en" argument, so a single
+//                               window can switch language without touching
+//                               settings.json (CLAUDE_SL_LANG=en claude)
 //   CLAUDE_SL_SEGMENTS=...      same as the <segments> argument
 //   CLAUDE_SL_ACCOUNT=you@x.com per-window account label for the account/email
 //                               segment (set before launching claude). Needed when
@@ -41,10 +44,15 @@
 //                               "tokens" segment keeps its per-session tally in
 //                               <dir>/sessions/ so it only reads new transcript bytes
 const args = process.argv.slice(2);
-const ZH = args.includes("zh") || process.env.CLAUDE_SL_LANG === "zh";
+// The language lives in the statusLine command in settings.json, so without an
+// explicit "en" there is no way to override it for one window — you'd have to
+// edit settings and restart. "en" wins over "zh" wherever both appear.
+const EN = args.includes("en") || process.env.CLAUDE_SL_LANG === "en";
+const ZH = !EN && (args.includes("zh") || process.env.CLAUDE_SL_LANG === "zh");
 const DEMO = args.includes("demo");
+const LANG_OR_DEMO = new Set(["zh", "en", "demo"]);
 const segArg =
-  args.find((a) => a !== "zh" && a !== "demo") || process.env.CLAUDE_SL_SEGMENTS || "";
+  args.find((a) => !LANG_OR_DEMO.has(a)) || process.env.CLAUDE_SL_SEGMENTS || "";
 const ALL = "model,effort,5h,week,account,ctx,tokens,cost";
 const segs = (segArg === "all" ? ALL : segArg || "model,effort,5h,week")
   .split(",")
