@@ -174,7 +174,7 @@ echo "A7  the default line renders exactly as documented"
 check "A7 zh default" "$(node "$SL" zh model,effort,5h,week demo)" \
   "Opus 4.8·high | 5h 剩 87% (3h12m) | 週 剩 62% (4d6h)"
 check "A7 en default" "$(node "$SL" model,effort,5h,week demo)" \
-  "Opus 4.8·high | 5h 87% left (resets 3h12m) | week 62% left (resets 4d6h)"
+  "Opus 4.8·high | 5h 87% left (3h12m) | week 62% left (4d6h)"
 
 echo "A8  the line wraps to two rows only when it doesn't fit COLUMNS"
 rows() { COLUMNS="$1" node "$SL" ${3:-} $2 demo | wc -l | tr -d ' '; }   # wc -l counts the \n

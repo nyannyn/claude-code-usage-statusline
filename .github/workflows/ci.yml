@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  # The status line is what people install; the dashboard tests (tests/test-dash.sh)
+  # stay out of CI on purpose — they bind ports and poke a live endpoint.
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: install.mjs still carries the current sources
+        run: node tests/check-embed.mjs
+      - name: status line tests
+        run: bash tests/test-statusline.sh
+
+  # "Native on Windows, no bash required" is a headline claim; run the product path
+  # there for real rather than trusting that Node is Node.
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - run: node tests/check-embed.mjs
+      - name: renders a line
+        run: node statusline-limits.mjs zh all demo

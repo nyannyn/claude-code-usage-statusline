@@ -266,6 +266,10 @@ fs.writeFileSync('install.mjs', s);
 "
 ```
 
+漏做這一步是看不出來的——repo 一切正常、測試全過，但 `curl | node` 裝到的是舊版腳本。
+`node tests/check-embed.mjs` 會把兩個 blob 解碼回來跟原始檔比對;CI 在每次 push 與
+pull request 都會跑它,連同 `bash tests/test-statusline.sh`。
+
 ## 類似專案
 
 - [hell0github/claude-statusline](https://github.com/hell0github/claude-statusline) — 輕量,追蹤 context/cost/重置(Bash 撰寫;Windows 需 WSL 或 Git Bash)

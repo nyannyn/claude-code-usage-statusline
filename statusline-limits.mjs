@@ -96,8 +96,10 @@ const T = ZH
       wait: "usage shown after first request",
       week: "week",
       none: (label) => `${dim(label)} —`,
+      // no "resets" in front of the countdown, same as the zh line: a time in
+      // parentheses after a quota already reads as one, and it costs 14 columns
       seg: (label, r, c) =>
-        `${dim(label)} ${gauge(+r, r + "%")} ${dim("left")}${c ? ` ${dim(`(resets ${c})`)}` : ""}`,
+        `${dim(label)} ${gauge(+r, r + "%")} ${dim("left")}${c ? ` ${dim(`(${c})`)}` : ""}`,
       soon: "resetting",
       ctx: (p) => `${dim("context")} ${gauge(100 - p, p + "%")} ${dim("used")}`,
       tokensLabel: "session",

@@ -73,7 +73,7 @@ $ node statusline-limits.mjs zh all demo
 Opus 4.8·high | 5h 剩 87% (3h12m) | 週 剩 62% (4d6h) | <account-name>
 
 $ node statusline-limits.mjs model,effort,5h,week,email demo
-Opus 4.8·high | 5h 87% left (resets 3h12m) | week 62% left (resets 4d6h) | you@example.com
+Opus 4.8·high | 5h 87% left (3h12m) | week 62% left (4d6h) | you@example.com
 ```
 
 For `account` / `email`, `demo` shows the user's real account if `~/.claude.json`

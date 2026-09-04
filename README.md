@@ -5,7 +5,7 @@
 A status line for [Claude Code](https://claude.com/claude-code) that shows the current model, its **reasoning effort level**, and your subscription's **5-hour and weekly usage** with reset countdowns — at a glance, on every prompt.
 
 ```
-Opus 4.8·high | 5h 87% left (resets 3h12m) | week 62% left (resets 4d6h)
+Opus 4.8·high | 5h 87% left (3h12m) | week 62% left (4d6h)
 ```
 
 The `·high` after the model name is the live reasoning effort (`low` / `medium` / `high` / `xhigh` / `max`) — handy because higher effort burns through your quota faster. It is omitted for models that don't support the effort parameter.
@@ -96,7 +96,7 @@ node statusline-limits.mjs zh all demo
 # Opus 4.8·high | 5h 剩 87% (3h12m) | 週 剩 62% (4d6h) | your-name
 
 node statusline-limits.mjs model,effort,5h,week,email demo
-# Opus 4.8·high | 5h 87% left (resets 3h12m) | week 62% left (resets 4d6h) | you@example.com
+# Opus 4.8·high | 5h 87% left (3h12m) | week 62% left (4d6h) | you@example.com
 ```
 
 Install with your chosen segments by appending them:
@@ -285,6 +285,11 @@ for (const [c, f] of [['SCRIPT_B64', 'statusline-limits.mjs'], ['DASHBOARD_B64',
 fs.writeFileSync('install.mjs', s);
 "
 ```
+
+Forgetting that step is invisible — the repo looks fine, the tests pass, and
+`curl | node` installs the previous version of the script. `node tests/check-embed.mjs`
+decodes both blobs and compares them with the sources; CI runs it on every push and
+pull request together with `bash tests/test-statusline.sh`.
 
 ## Similar projects
 
